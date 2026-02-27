@@ -180,6 +180,7 @@ class InspectionProblem:
         self.sample_index = len(self.tasks)*10
 
         self.last_target_point, self.last_target_dir = None, None
+        self.last_vis_pos = None
 
     def completed_all_tasks(self):
         completed = []
@@ -204,18 +205,33 @@ class InspectionProblem:
     ### PLANNING METHODS
     ###
     def update_knowledge(self, agent_pos_w, lidar_readings):
+        agent_pos = self.map.world_to_map(*agent_pos_w[:2])
+        # checking if agent's vision has changed significantly
+        # - if it doesn't, do not update
+        if self.last_vis_pos is not None and \
+         np.linalg.norm(np.array([agent_pos[0],agent_pos[1]]) \
+         - np.array([self.last_vis_pos[0],self.last_vis_pos[1]])) < 1:
+            return
+        self.last_vis_pos = agent_pos
+
+        current_state = self.get_current_state(agent_pos)
+
         # updating map knowledge
         self.map.update_with_lidar(agent_pos_w, lidar_readings, max_dist=self.visibility_radius)
         self.map.compute_cost_map()
 
-        # saving visited positions
-        agent_pos = self.map.world_to_map(*agent_pos_w[:2])
-        current_state = self.get_current_state(agent_pos)
+        r = int(self.visibility_radius / self.map.resolution)
+        cx, cy = agent_pos
 
-        for x in range(self.map.map_size[0]):
-            for y in range(self.map.map_size[1]):
-                if current_state.map.is_visible(agent_pos, (x,y), self.visibility_radius):
-                    self.memory_map[x,y] = 1
+        xmin = max(0, cx - r)
+        xmax = min(self.map.map_size[0], cx + r + 1)
+        ymin = max(0, cy - r)
+        ymax = min(self.map.map_size[1], cy + r + 1)
+
+        for x in range(xmin, xmax):
+            for y in range(ymin, ymax):
+                if current_state.map.is_visible(agent_pos, (x, y), self.visibility_radius):
+                    self.memory_map[x, y] = 1
 
         # updating task knowledge
         for tname in self.tasks:
@@ -308,7 +324,7 @@ class InspectionProblem:
         info = {'reward':0}
 
         # === Handle non-astar planners ===
-        if planner_name != 'astar':
+        if planner_name != 'astar' and len(action_sequence) != 0:
             current_action = action_sequence[0]
 
             if current_action in self.navigation_actions:
@@ -344,7 +360,7 @@ class InspectionProblem:
 
         # === Handle astar planner ===
         else:
-            if agent['pos'] == tuple(map(int, path[0])):
+            if path and agent['pos'] == tuple(map(int, path[0])):
                 pop_step()
 
         # === Compute target point and orientation ===

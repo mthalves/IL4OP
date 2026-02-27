@@ -16,6 +16,8 @@ from isaaclab.utils.math import quat_apply_inverse, wrap_to_pi, yaw_quat
 ##
 # Planning function
 ##
+import multiprocessing as mp
+
 class OnlinePlanning(ManagerTermBase):
 
     available_planning_algorithms = {
@@ -56,6 +58,19 @@ class OnlinePlanning(ManagerTermBase):
         # Support variables for log
         self.last_time2reason = 0.
         self.update = False
+
+        # Launching planning
+        self.plan_req_q = mp.Queue(maxsize=1)
+        self.plan_res_q = mp.Queue(maxsize=1)
+
+        self.planner_proc = mp.Process(
+            target=self.planner_worker,
+            args=(self.plan_req_q, self.plan_res_q),
+            daemon=True,
+        )
+        self.planner_proc.start()
+
+        self.planning_in_progress = False
 
     def get_problem(self, env, problem_name, args):
         if problem_name is None:
@@ -100,9 +115,25 @@ class OnlinePlanning(ManagerTermBase):
             print('The choosen method is not implemented:',self.planner_name)
             print('Loading default planning method: astar')
             self.planner_name = 'astar'
-            module = import_module(path+'astar')
+            module = import_module(path+self.planner_name)
             method = getattr(module, self.available_planning_algorithms['astar'])
         return method
+
+    def planner_worker(self, req_q, res_q):
+        while True:
+            msg = req_q.get()
+            if msg is None:
+                break
+
+            agent, problem_env = msg
+            action_sequence = self.planner.plan(agent, problem_env)
+
+            if self.planner_name != 'astar':
+                path = problem_env.translate_actions2path(agent, action_sequence)
+            else:
+                path = action_sequence
+
+            res_q.put((action_sequence, path))
 
     def __call__(self, env: ManagerBasedEnv, env_ids: torch.Tensor | None,
          planning_method: dict = {},
@@ -137,21 +168,26 @@ class OnlinePlanning(ManagerTermBase):
         # =============================
         # if no action sequence, plan a new one
         self.update = (len(self.action_sequence) == 0 or self.planner_name == 'astar')
-        if self.update:
-            # planning the action sequence
-            start_t = time.time()
-            self.action_sequence = self.planner.plan(agent, self.problem_env)
-            self.last_time2reason = time.time() - start_t
+        print('Updating/Checking plan...')
+        if self.update and not self.planning_in_progress:
+            try:
+                self.plan_req_q.put_nowait((agent, self.problem_env))
+                self.planning_in_progress = True
+            except:
+                pass  # queue full → planner still busy
+
+        # planning the action sequence
+        print('Trying to get the action')
+        if self.planning_in_progress and not self.plan_res_q.empty():
+            self.action_sequence, self.path = self.plan_res_q.get()
+            self.planning_in_progress = False
+
+            print(self.action_sequence)
             for action in self.action_sequence:
                 self.action_history.append(action)
-            print('Action sequence received:', self.action_sequence)
 
-            # translating the action sequence to planning path
-            if self.planner_name != 'astar':
-                self.path = self.problem_env.translate_actions2path(agent, self.action_sequence)
-            else:
-                self.path = self.action_sequence
-            print('Translated path:', self.path)
+            print("Action sequence received:", self.action_sequence)
+            print("Translated path:", self.path)
 
         # ===========================
         # === COMMAND SETTING ===
