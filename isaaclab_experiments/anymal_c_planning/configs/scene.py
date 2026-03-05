@@ -9,7 +9,7 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 
-from isaaclab_ros_experiments.planning.configs.assets.lidar import BetterRayCasterCfg
+from isaaclab_experiments.anymal_c_planning.assets.lidar import BetterRayCasterCfg
 
 @configclass
 class SquareCfg(InteractiveSceneCfg):

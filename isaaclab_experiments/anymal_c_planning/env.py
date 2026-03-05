@@ -12,8 +12,10 @@ from isaaclab_experiments.anymal_c_planning.configs.observations import Observat
 from isaaclab_experiments.anymal_c_planning.configs.commands import CommandsCfg
 from isaaclab_experiments.anymal_c_planning.configs.terminations import TerminationsCfg
 from isaaclab_experiments.anymal_c_planning.configs.events import EventCfg
-from isaaclab_experiments.anymal_c_planning.configs.scene import UShapedCfg as MySceneCfg
 from isaaclab_assets.robots.anymal import ANYMAL_C_CFG as MY_ROBOT_CFG
+
+# Change the bellow line to different scenarios
+from isaaclab_experiments.anymal_c_planning.configs.scene import UShapedCfg as MySceneCfg
 
 @configclass
 class AnymalCPlanningEnvCfg(ManagerBasedRLEnvCfg):

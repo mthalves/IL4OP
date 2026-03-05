@@ -150,7 +150,7 @@ class PlanningApp:
         return parser
     
     def check_skrl_version(self, skrl):
-        SKRL_VERSION = "1.4.2"
+        SKRL_VERSION = "1.4.3"
         if version.parse(skrl.__version__) < version.parse(SKRL_VERSION):
             skrl.logger.error(
                 f"Unsupported skrl version: {skrl.__version__}. "

@@ -49,10 +49,10 @@ def main():
     env.reset()
     
     header = ['Time','Reward','Time to reason']
-    problem_name = env_shape = env.event_manager.cfg.planning.func.problem_name
+    problem_name = env.event_manager.cfg.planning.func.problem_name
     scenario_name = 'ushaped'
 
-    planner_name = env_shape = env.event_manager.cfg.planning.func.planner_name
+    planner_name = env.event_manager.cfg.planning.func.planner_name
 
     log = LogFile(problem_name,scenario_name,planner_name,args_cli.exp_num,header)
 

@@ -1,7 +1,6 @@
 
 import torch
-import time
-import math
+import traceback
 
 from isaaclab.utils import configclass
 from isaaclab.managers import SceneEntityCfg
@@ -21,10 +20,14 @@ import multiprocessing as mp
 class OnlinePlanning(ManagerTermBase):
 
     available_planning_algorithms = {
-        'astar': 'AStarPlanner',
-        'pomcp': 'POMCP',
-        'ibpomcp': 'IBPOMCP',
-        'tbrhopomcp':'TBRhoPOMCP',
+        'astar'     : 'AStarPlanner',
+        'pomcp'     : 'POMCP',
+        'despot'    : 'DESPOT',
+        'ibpomcp'   : 'IBPOMCP',
+        'tbrhopomcp': 'TBRhoPOMCP',
+        'pomcpdpw'  : 'POMCPDPW',
+        'pomdpow'   : 'POMCPOW',
+        'pftdpw'    : 'PFTDPW',
     }
     available_problems = {
         'inspection': 'InspectionProblem',
@@ -113,10 +116,10 @@ class OnlinePlanning(ManagerTermBase):
             method = getattr(module, self.available_planning_algorithms[self.planner_name])
         except:
             print('The choosen method is not implemented:',self.planner_name)
-            print('Loading default planning method: astar')
-            self.planner_name = 'astar'
-            module = import_module(path+self.planner_name)
-            method = getattr(module, self.available_planning_algorithms['astar'])
+            print('Other error may also occurred:')
+            traceback.print_exc()
+            exit(1)
+        print('Importing planner:',self.planner_name)
         return method
 
     def planner_worker(self, req_q, res_q):
@@ -276,7 +279,7 @@ class EventCfg:
                 #    "max_it":1000,
                 #    "kwargs":{},
                 #},
-                "name":"ibpomcp",
+                "name":"pomcpdpw",
                 "args":{
                     "max_depth":20,
                     "max_it":1000,
