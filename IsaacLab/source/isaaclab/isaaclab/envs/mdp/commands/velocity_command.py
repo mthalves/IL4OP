@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -7,11 +7,11 @@
 
 from __future__ import annotations
 
-import torch
+import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-import omni.log
+import torch
 
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation
@@ -22,6 +22,9 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
     from .commands_cfg import NormalVelocityCommandCfg, UniformVelocityCommandCfg
+
+# import logger
+logger = logging.getLogger(__name__)
 
 
 class UniformVelocityCommand(CommandTerm):
@@ -65,7 +68,7 @@ class UniformVelocityCommand(CommandTerm):
                 " parameter is set to None."
             )
         if self.cfg.ranges.heading and not self.cfg.heading_command:
-            omni.log.warn(
+            logger.warning(
                 f"The velocity command has the 'ranges.heading' attribute set to '{self.cfg.ranges.heading}'"
                 " but the heading command is not active. Consider setting the flag for the heading command to True."
             )
@@ -203,7 +206,6 @@ class UniformVelocityCommand(CommandTerm):
         default_scale = self.goal_vel_visualizer.cfg.markers["arrow"].scale
         # arrow-scale
         arrow_scale = torch.tensor(default_scale, device=self.device).repeat(xy_velocity.shape[0], 1)
-        xy_velocity = xy_velocity.to(self.device)
         arrow_scale[:, 0] *= torch.linalg.norm(xy_velocity, dim=1) * 3.0
         # arrow-direction
         heading_angle = torch.atan2(xy_velocity[:, 1], xy_velocity[:, 0])
@@ -211,9 +213,6 @@ class UniformVelocityCommand(CommandTerm):
         arrow_quat = math_utils.quat_from_euler_xyz(zeros, zeros, heading_angle)
         # convert everything back from base to world frame
         base_quat_w = self.robot.data.root_quat_w
-        
-        base_quat_w = base_quat_w.to(self.device)
-        arrow_quat = arrow_quat.to(self.device)
         arrow_quat = math_utils.quat_mul(base_quat_w, arrow_quat)
 
         return arrow_scale, arrow_quat

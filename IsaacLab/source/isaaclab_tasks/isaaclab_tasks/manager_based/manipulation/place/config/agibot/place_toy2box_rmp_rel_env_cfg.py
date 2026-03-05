@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -198,6 +198,10 @@ class PlaceToy2BoxEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
         self.sim.physx.friction_correlation_distance = 0.00625
 
+        # set viewer to see the whole scene
+        self.viewer.eye = [1.5, -1.0, 1.5]
+        self.viewer.lookat = [0.5, 0.0, 0.0]
+
 
 """
 Env to Replay Sim2Lab Demonstrations with JointSpaceAction
@@ -205,6 +209,7 @@ Env to Replay Sim2Lab Demonstrations with JointSpaceAction
 
 
 class RmpFlowAgibotPlaceToy2BoxEnvCfg(PlaceToy2BoxEnvCfg):
+    """Configuration for the Agibot Place Toy2Box RMP Rel Environment."""
 
     def __post_init__(self):
         # post init of parent

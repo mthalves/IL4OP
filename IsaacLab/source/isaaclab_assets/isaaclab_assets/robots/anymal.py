@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -19,13 +19,13 @@ Reference:
 
 """
 
-from isaaclab_assets.sensors.velodyne import VELODYNE_VLP_16_RAYCASTER_CFG
-
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ActuatorNetLSTMCfg, DCMotorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 from isaaclab.sensors import RayCasterCfg
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
+
+from isaaclab_assets.sensors.velodyne import VELODYNE_VLP_16_RAYCASTER_CFG
 
 ##
 # Configuration - Actuators.
@@ -107,11 +107,6 @@ ANYMAL_C_CFG = ArticulationCfg(
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=True, solver_position_iteration_count=4, solver_velocity_iteration_count=0
         ),
-        # - change ANYmal color using the preview material
-        #visual_material=sim_utils.spawners.materials.PreviewSurfaceCfg(
-        #    diffuse_color=(0.5,0.0,0.5),
-        #    metallic=0.1
-        #)
         # collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.02, rest_offset=0.0),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
