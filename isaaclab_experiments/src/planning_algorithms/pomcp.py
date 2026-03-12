@@ -13,22 +13,10 @@ class POMCP(object):
         self.max_depth = max_depth
         self.max_it = max_it
         
-        discount_factor = kwargs.get('discount_factor')
-        self.discount_factor = discount_factor\
-            if discount_factor is not None else 0.95
-
-        ###
-        # POMCP enhancements
-        ###
-        # particle Revigoration (silver2010pomcp)
-        particle_revigoration = kwargs.get('particle_revigoration')
-        if particle_revigoration is not None:
-            self.pr = particle_revigoration
-        else: #default
-            self.pr = True
-
-        k = kwargs.get('k') # particle filter size
-        self.k = k if k is not None else 100
+        self.c                      = kwargs.get('exploration_weight',0.5) # exploration_weight
+        self.discount_factor        = kwargs.get('discount_factor',0.95) # discount factor (historical weight)
+        self.particle_revigoration  = kwargs.get('particle_revigoration',True) # enable particle revigoration (silver2010pomcp)
+        self.k                      = kwargs.get('k', 100) # particle filter size
 
     def simulate_action(self, node, action):
         # 1. Acting
@@ -173,7 +161,7 @@ class POMCP(object):
             )
 
         # 3. Performing particle revigoration
-        if self.pr:
+        if self.particle_revigoration:
             particle_revigoration(state, problem, self.root, self.k)
 
         # 4. Searching for the best action within the tree

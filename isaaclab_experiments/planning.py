@@ -15,33 +15,24 @@ elif args_cli.ml_framework.startswith("jax"):
 if args_cli.ml_framework.startswith("jax"):
     skrl.config.jax.backend = "jax" if args_cli.ml_framework == "jax" else "numpy"
 
-from isaaclab_rl.skrl import SkrlVecEnvWrapper
-from isaaclab_tasks.utils import parse_env_cfg
-
-###
-# environment setup
-###
-def init_environment(env_id, num_envs, disable_fabric=False, video=False, ml_framework='torch', device='cpu'):
-    env_cfg = parse_env_cfg(env_id, device=device, num_envs=num_envs, use_fabric=not disable_fabric)
-    env = gym.make(env_id, cfg=env_cfg, render_mode="rgb_array" if video else None)
-    env = SkrlVecEnvWrapper(env, ml_framework=ml_framework)
-    obs, _ = env.reset()
-    return env, obs
 ###
 # main routine - start
 ###
-import gymnasium as gym
 import time
 
-from isaaclab_experiments.anymal_c_planning import ENV_ID, get_policies, get_low_level_obs, get_high_level_obs
+from isaaclab_experiments.anymal_c_planning import init_environment, \
+    get_env_id, get_policies, get_low_level_obs, get_high_level_obs
+
+MY_ENV_ID = get_env_id(args_cli.space)
 HLPOLICY, LLPOLICY = get_policies(device=args_cli.device)
 
 from utils.camera import init_camera, update_camera
 from utils.log import LogFile
 
-CAMERA_FOLLOW_ROBOT = True
+CAMERA_FOLLOW_ROBOT = args_cli.follow_camera
+
 def main():
-    env, obs = init_environment(ENV_ID, args_cli.num_envs, args_cli.disable_fabric,
+    env, obs = init_environment(MY_ENV_ID, args_cli.num_envs, args_cli.disable_fabric,
                            args_cli.video, args_cli.ml_framework, args_cli.device)
     
     env_shape = env.event_manager.cfg.planning.func.get_map_size()
@@ -50,14 +41,15 @@ def main():
     
     header = ['Time','Reward','Time to reason']
     problem_name = env.event_manager.cfg.planning.func.problem_name
-    scenario_name = 'ushaped'
+    scenario_name = env.cfg.scene.scenario_name
 
     planner_name = env.event_manager.cfg.planning.func.planner_name
 
-    log = LogFile(problem_name,scenario_name,planner_name,args_cli.exp_num,header)
+    log = LogFile(problem_name,scenario_name,planner_name,args_cli.exp_num,header) \
+        if args_cli.log else None
 
     start_t = time.time()
-    while simulation_app.is_running() and (time.time() - start_t) < 900.:
+    while simulation_app.is_running() and (time.time() - start_t) < env.termination_manager.cfg.max_time:
         hlobs = get_high_level_obs(obs)
         llcmd = HLPOLICY(hlobs)
         
@@ -77,7 +69,8 @@ def main():
             data = {'time':cur_time,
                     'reward':last_reward,
                     'time2reason':last_time2reason}
-            log.write(data)
+            
+            if log: log.write(data)
 
         if CAMERA_FOLLOW_ROBOT:
             update_camera(env)

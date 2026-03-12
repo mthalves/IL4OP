@@ -12,6 +12,10 @@ import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 class TerminationsCfg:
     """Termination terms for the MDP."""
 
+    @property
+    def max_time(self):
+        return 900.
+
     base_contact = DoneTerm(
         func=mdp.illegal_contact,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="base"), "threshold": 1.0},

@@ -110,6 +110,14 @@ class SquareCfg(InteractiveSceneCfg):
 class UShapedCfg(InteractiveSceneCfg):
     """Configuration for the terrain scene with a legged robot."""
 
+    @property
+    def scenario_name(self):
+        return 'ushaped'
+    
+    @property
+    def init_pos(self): # robot initial position in x,y,z
+        return (13.5, 14.5, 0.6)
+
     # ground terrain
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",

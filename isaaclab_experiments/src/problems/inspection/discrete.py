@@ -2,13 +2,13 @@ import numpy as np
 import operator
 import random as rd
 
-from isaaclab_experiments.src.map import InflationMap, compute_dist, bresenham
+from isaaclab_experiments.src.map import DiscreteInflationMap, compute_dist
 
-class InspectionProblemState:
+class DiscreteInspectionProblemState:
 
     def __init__(self, 
         agent_pos           : tuple, 
-        inf_map             : InflationMap,
+        inf_map             : DiscreteInflationMap,
         actions_dict        : dict, 
         tasks_found         : dict, 
         inspection_counter  : dict, 
@@ -117,7 +117,7 @@ class InspectionProblemState:
         return hash(str(obs))
     
     def copy(self):
-        copied_state = InspectionProblemState(
+        copied_state = DiscreteInspectionProblemState(
             (self.agent_pos[0], self.agent_pos[1]),
             self.map,
             self.actions_dict,
@@ -129,7 +129,7 @@ class InspectionProblemState:
         )
         return copied_state
 
-class InspectionProblem:
+class DiscreteInspectionProblem:
 
     navigation_actions  = ['N', 'S', 'W', 'E']
     task_actions        = ['X']
@@ -156,7 +156,7 @@ class InspectionProblem:
         tasks                   :dict ={}
     ):
         # initializing environment map
-        self.map = InflationMap(
+        self.map = DiscreteInflationMap(
             map_size_w,resolution,z_min,z_max,confirm_threshold,
             inscribed_radius,inflation_radius,cost_scaling_factor
         )
@@ -244,7 +244,7 @@ class InspectionProblem:
                     self.inspection_counter[tname] = 0
 
     def get_current_state(self, agent_pos):
-        state = InspectionProblemState(\
+        state = DiscreteInspectionProblemState(\
             (agent_pos[0],agent_pos[1]), 
             self.map, 
             self.actions_dict, 

@@ -30,68 +30,55 @@ Publicly available to foster research! :sparkles:
 
 ## :arrow_forward: Running Experiments
 
-1. Configure your setup:
-- Open `isaaclab_experiments/anymal_c_planning/events.py:234`;
-- Change the planning algorithm and problem definitions as needed. Take a look in an example:
+### 1. Configure your agent/planning algorithm:
+- Open `isaaclab_experiments/anymal_c_planning/agents/planning_cfg.py:60`;
+- You will see a list of standard agents configurations:
   
   ```python
-   params={
-      "planning_method":{
-            "name":"ibpomcp",
-            "args":{
-               "max_depth":20,
-               "max_it":1000,
-               "kwargs":{},
-            },
-            ###
-            # Possibilities
-            ###
-            # 1) A-STAR
-            #"name":"astar",
-            #"args":{},
-            #
-            # 2) POMCP
-            #"name":"pomcp",
-            #"args":{
-            #    "max_depth":20,
-            #    "max_it":1000,
-            #    "kwargs":{},
-            #},
-            #
-            # 3) TB rho-POMCP
-            #"name":"tbrhopomcp",
-            #"args":{
-            #    "max_depth":20,
-            #    "max_it":1000,
-            #    "kwargs":{'time_budget':2.0,'smallbag_size':10},
-            #},
+   DISCRETE_AGENT_CFG = {
+      "astar":{},
+      "despot":{
+         "max_depth":20,
+         "max_it":1000,
+         "kwargs":{
+               "discount_factor":0.95,
+               "num_scenarios":100,
+               "lambda_reg":0.005,
+         },
       },
-      "problem": {
-            "name":"inspection",
-            "args": {
-               "map_size_w": (17, 17),
-               "z_min":0.1, "z_max":1.0,
-               "resolution":               1., 
-               "confirm_threshold":        2,
-               "inscribed_radius":         0.1, 
-               "inflation_radius":         0.0, 
-               "cost_scaling_factor":      0.5,
-               "visibility_radius":        5.,
-               "max_inspection":           1,
-               "max_inspection_distance":  2.9,
-               "tasks": ['box_1','box_2','box_3'],
-            },
+      "ibpomcp":{
+         "max_depth":20,
+         "max_it":1000,
+         "kwargs":{
+               "discount_factor":0.95,
+               "particle_revigoration":True,
+               "k":100,
+         },
       },
-      "command_name": 'pose_commands',
-      "robot_cfg": SceneEntityCfg("robot"),
-      "lidar_cfg": SceneEntityCfg("lidar_sensor"),
-   },
+      "pomcp":{
+         "max_depth":20,
+         "max_it":1000,
+         "kwargs":{
+               "discount_factor":0.95,
+               "particle_revigoration":True,
+               "k":100,
+         },
+      },
+      ...
+   }
+  ``` 
+- Select one key (method name), change the planning algorithm parameters as needed and have fun testing it! :smile:
+
+  ```python
+   # Select your execution/planning method changing the bellow lines
+   DISCRETE_METHOD   = "ibpomcp" 
+   CONTINUOUS_METHOD = "pomcpow"
   ``` 
 
-2. Run your experiment:
+### 2. Run your experiment:
 - For a single experiment:
    ```bash
-   python isaaclab_experiments/planning.py
+   python isaaclab_experiments/planning.py --log True
    ```
 - For multiple experiments with screen recording:
    ```bash
@@ -101,7 +88,17 @@ Publicly available to foster research! :sparkles:
   - :warning: The script `run_planning_experiments.py` was tested on Ubuntu 22.04.5 LTS.
   - It has not been ported to other operating systems. Some additional requirements may still need to be installed.
 
-3. Results are saved in `logs/inspection/`. This includes log files and videos for analysis.
+### 3. Results are saved in `logs/inspection/`. This includes log files and videos for analysis.
+- We let the necessary code for plotting and analysing the results ready and available in the `logs` directory. 
+- Easy to run, easy to analyse. :kissing_smiling_eyes:
+
+
+## :computer: In development & Future directions
+
+- [ ] Single agent planning using discrete world and decision models.
+- [ ] Support planning algorithms with continuous world and decision models.
+- [ ] Extension of the single agent scenario to multi-agent problems (toilored to centralized and decentralized approaches).
+- [ ] Extension of IL4OP to support dynamic world models applications.
 
 ## :book: Citation
 

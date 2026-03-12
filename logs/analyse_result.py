@@ -6,7 +6,7 @@ warnings.filterwarnings("ignore")
 
 # 1. Defining analysis  settings
 NEXP = 50
-ENV  = 'inspection'
+ENV  = 'inspection.discrete'
 SCENARIO = ['ushaped']
 PATH = './logs/'+ENV+'/'
 

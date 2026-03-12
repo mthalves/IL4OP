@@ -2,7 +2,6 @@ import inspect
 import os
 import datetime
 import warnings
-import sys
 
 ######
 # EXCEPTION METHODS
@@ -16,15 +15,16 @@ def lineno():
 ######
 class LogFile:
 
-    def __init__(self,exp_name,scenario,method,exp_num,*args):
+    def __init__(self,problem_name,scenario,method,exp_num,*args):
         # creating the path
         if(not os.path.isdir("./logs")):
             os.mkdir("./logs")
 
-        self.exp_name = exp_name if scenario is None or scenario == '' else exp_name+'_'+scenario
+        self.exp_name = problem_name if scenario is None or scenario == '' else problem_name+'_'+scenario
         self.header = args
-        self.path = "./logs/"+exp_name+'/'
 
+        main_problem = problem_name.split('.')[0]
+        self.path = "./logs/"+main_problem+'/'
         if(not os.path.isdir(self.path)):
             os.mkdir(self.path)
 

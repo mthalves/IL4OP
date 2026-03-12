@@ -15,23 +15,10 @@ class TBRhoPOMCP(object):
         self.episode = 0
         self.max_depth = max_depth
         self.max_it = max_it
-        self.c = 0.5
-        discount_factor = kwargs.get('discount_factor')
-        self.discount_factor = discount_factor\
-            if discount_factor is not None else 0.95
-
-        ###
-        # POMCP enhancements
-        ###
-        # particle Revigoration (silver2010pomcp)
-        particle_revigoration = kwargs.get('particle_revigoration')
-        if particle_revigoration is not None:
-            self.pr = particle_revigoration
-        else: #default
-            self.pr = True
-
-        k = kwargs.get('k') # particle filter size
-        self.k = k if k is not None else 100
+        
+        self.discount_factor        = kwargs.get('discount_factor',0.95) # discount factor (historical weight)
+        self.particle_revigoration  = kwargs.get('particle_revigoration',True) # enable particle revigoration (silver2010pomcp)
+        self.k                      = kwargs.get('k', 100) # particle filter size
         
         smallbag_size = kwargs.get('smallbag_size') # smallbag size
         self.smallbag_size = smallbag_size if smallbag_size is not None else 10
@@ -210,7 +197,7 @@ class TBRhoPOMCP(object):
             
             # a. Sampling the belief state for simulation
             if len(root.particle_filter) < 1 + self.smallbag_size:
-                beliefState = problem.sample_nstate(root.state, 1 + self.smallbag_size)
+                sampled_states = problem.sample_nstate(root.state, 1 + self.smallbag_size)
                 beliefState, smallbag = sampled_states[0], sampled_states[1:]
             else:
                 sampled_states = random.sample(root.particle_filter, 1 + self.smallbag_size)
@@ -246,7 +233,7 @@ class TBRhoPOMCP(object):
             )
 
         # 3. Performing particle revigoration
-        if self.pr:
+        if self.particle_revigoration:
             particle_revigoration(state, problem, self.root, self.k)
 
         # 4. Searching for the best action within the tree

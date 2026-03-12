@@ -46,7 +46,8 @@ try:
             exp_cmd = [
                 "python", 
                 "isaaclab_experiments/planning.py", 
-                "--exp_num", str(exp_num)
+                "--exp_num", str(exp_num),
+                "--log",str(True)
             ]
             print("Experiment command:", " ".join(exp_cmd))
             exp_proc = subprocess.Popen(exp_cmd)

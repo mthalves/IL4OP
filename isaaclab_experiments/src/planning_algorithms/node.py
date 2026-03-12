@@ -1,4 +1,5 @@
 import math
+import numpy as np
 import random
 
 from isaaclab_experiments.src.planning_algorithms.qlearn import \
@@ -481,3 +482,312 @@ class RhoONode(ONode):
             self.cummulative_bag[hash_key] =  [particle,obs_p]
         else:
             self.cummulative_bag[hash_key] =  [particle,self.cummulative_bag[hash_key][1] + obs_p]
+
+
+
+
+
+
+
+"""
+    DESPOT nodes
+"""
+class DespotANode(Node):
+    def __init__(self, action, state, depth, parent, actions, scenarios=[]):
+        super().__init__(state, depth, parent)
+        self.scenarios = scenarios if scenarios is not None else []
+        self.num_scenarios = len(scenarios)
+
+        self.action = action
+        self.actions = actions
+        self.observation = None
+
+        self.reward      = 0.0
+        self.upper_bound = 0.0
+        self.lower_bound = 0.0
+
+
+class DespotONode(Node):
+    def __init__(self, observation, state, depth, parent, actions, scenarios=[]):
+        super().__init__(state, depth, parent)
+        self.scenarios = scenarios if scenarios is not None else []
+        self.num_scenarios = len(scenarios)
+
+        self.action = None
+        self.actions = actions
+        self.observation = observation
+
+        self.reward      = 0.0
+        self.upper_bound = 0.0
+        self.lower_bound = 0.0
+
+    def get_best_action(self, mode="upper_bound"):
+        """
+        DESPOT action selection:
+        argmax_a lower_bound(Q(b0, a))
+        """
+        assert len(self.children) > 0, "Root has no action children"
+
+        if mode == "lower_bound":
+            best = max(self.children, key=lambda a: a.lower_bound)
+        elif mode == "upper_bound":
+            best = max(self.children, key=lambda a: a.upper_bound)
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+
+        return best.action
+
+    def subtree_size(self, node):
+        return 1 + sum(self.subtree_size(c) for c in node.children)
+    
+    def show(self):
+        print("\n=== DESPOT Root Decision ===")
+        print(f"{'Action':>10} | {'LB':>8} | {'UB':>8} | {'Scen':>6} | {'Size':>6}")
+        print("-" * 50)
+
+        for anode in self.children:
+            lb = anode.lower_bound
+            ub = anode.upper_bound
+            scen = sum(c.num_scenarios for c in anode.children)
+            size = self.subtree_size(anode)
+
+            print(f"{str(anode.action):>10} | {lb:8.3f} | {ub:8.3f} | {scen:6d} | {size:6d}")
+
+        best = max(self.children, key=lambda a: a.lower_bound)
+        print("\n✔ Selected action:", best.action)
+
+
+def find_new_despot_root(
+ current_state, previous_action, current_observation, previous_root
+) -> DespotONode:
+    # 1. If the root doesn't exist yet, create it
+    # - NOTE: The root is always represented as an "observation node" since the 
+    # next node must be an action node.
+    if previous_root is None:
+        new_root = DespotONode(\
+            observation=current_observation,state=current_state,depth=0,parent=None,\
+                actions=current_state.actions,scenarios=[])
+        print('<!> Creating new root node: no previous root found')
+        return new_root
+
+    # 2. Else, walk on the tree to find the new one (giving the previous information)
+    action_node, observation_node, new_root = None, None, None
+
+    # a. walking over action nodes
+    for child in previous_root.children:
+        if child.action == previous_action:
+            action_node = child
+            break
+
+    # - if we didn't find the action node, create a new root
+    if action_node is None:
+        new_root = DespotONode(\
+            observation=current_observation,state=current_state,depth=0,parent=None,\
+                actions=current_state.actions,scenarios=[])
+        print('<!> Creating new root node: no action node found')
+        return new_root
+
+
+    # b. walking over observation nodes
+    for child in action_node.children:
+        obs = child.observation
+        if child.state.observation_is_equal(obs, current_observation):
+            observation_node = child
+            break
+
+    # - if we didn't find the action node, create a new root
+    if observation_node is None:
+        new_root = DespotONode(\
+            observation=current_observation,state=current_state,depth=0,parent=None,\
+                actions=current_state.actions,scenarios=[])
+        print('<!> Creating new root node: no observation node found')
+        return new_root
+
+    # 3. Definig the new root and updating the depth
+    new_root = observation_node
+    new_root.parent = None
+    new_root.update_depth(0)
+    print('<y> Walking on the tree to find the new root node')
+    return new_root
+
+
+"""
+    Continuous nodes
+"""
+class CNode(Node):
+
+    def __init__(self, action, state, depth, parent=None):
+        super(CNode,self).__init__(state,depth,parent)
+        self.value = 0
+        self.action = action
+        self.action_range = state.action_range
+        self.qtable = create_qtable(state.actions)
+
+    @property
+    def actions(self) -> list[float]:
+        return [child.action for child in self.children]
+
+    def update(self, action, result):
+        # Actions already tried
+        if str(action) in self.qtable:
+            self.qtable[str(action)]['trials'] += 1
+            self.qtable[str(action)]['sumvalue'] += result
+            self.qtable[str(action)]['qvalue'] += \
+                (float(result) - self.qtable[str(action)]['qvalue']) / float(self.qtable[str(action)]['trials'])
+            self.value += (result-self.value)/self.visits
+        # New actions
+        else:
+            self.qtable[str(action)] = {'qvalue':0.0,'sumvalue':0.0,'trials':0}
+            self.qtable[str(action)]['trials'] += 1
+            self.qtable[str(action)]['sumvalue'] += result
+            self.qtable[str(action)]['qvalue'] += \
+                (float(result) - self.qtable[str(action)]['qvalue']) / float(self.qtable[str(action)]['trials'])
+            self.value += (result-self.value)/self.visits
+
+    def get_actions_prob_distribution(self, mode='max', max_reward=1):
+        prob_distribution = {}
+        
+        norm = 0.0
+        for a in self.qtable:
+            if mode == 'max':
+                prob_distribution[a] = self.qtable[a]['qvalue']
+            elif mode == 'min':
+                prob_distribution[a] = (max_reward-self.qtable[a]['qvalue'])
+            else:
+                raise NotImplemented
+            norm += prob_distribution[a]
+        
+        if norm == 0.0:
+            for a in prob_distribution:
+                prob_distribution[a] = 1/len(prob_distribution)
+        else:
+            for a in prob_distribution:
+                prob_distribution[a] /= norm
+
+        return prob_distribution
+
+    def get_best_action(self,mode='max'):
+        # 1. Intialising the support variables
+        # - maximisation
+        if mode == 'max' or mode == 'ucb':
+            target = 'max'
+            best_action, bestQ = None, -100000000000
+        # - minimisation
+        elif mode == 'min' or mode == 'ucb-min':
+            target = 'min'
+            best_action, bestQ = None, 100000000000
+        # - not implemented
+        else:
+            print('Invalid best action mode:',mode)
+            raise NotImplemented
+
+        # 2. Looking for the best action (max qvalue action)
+        for a in self.actions:
+            if target == 'max' and  \
+             self.qtable[str(a)]['qvalue'] > bestQ  and \
+             self.qtable[str(a)]['trials'] > 0:
+                bestQ = self.qtable[str(a)]['qvalue']
+                best_action = a
+            elif target == 'min' and \
+             self.qtable[str(a)]['qvalue'] < bestQ and \
+             self.qtable[str(a)]['trials'] > 0:
+                bestQ = self.qtable[str(a)]['qvalue']
+                best_action = a
+
+        # 3. Checking if a tie case exists
+        tieCases = []
+        for a in self.actions:
+            if self.qtable[str(a)]['qvalue'] == bestQ:
+                tieCases.append(a)
+
+        if len(tieCases) > 1:
+            # trying tie break by number of visits
+            trials = [self.qtable[str(a)]['trials'] for a in tieCases]
+            max_trial = max(trials)
+            trialTieCases = []
+            for a in tieCases:
+                if self.qtable[str(a)]['trials'] == max_trial:
+                    trialTieCases.append(a)
+
+            if len(trialTieCases) > 1:
+                best_action = random.choice(trialTieCases)
+            else:
+                best_action = trialTieCases[0]
+
+        # 4. Returning the best action
+        if best_action is None:
+            best_action = random.sample(self.actions,1)[0]
+        
+        return best_action
+
+    def show_qtable(self):
+        print('%8s %8s %8s %8s' % ('Action','Q-Value','SumValue','Trials'))
+        action_dict = {}
+        for a in self.actions:
+            action_dict[str(a)] = [self.qtable[str(a)]['qvalue'],self.qtable[str(a)]['trials']]
+        action_dict = sorted(action_dict,key=lambda x:(action_dict[x][0],action_dict[x][1]), reverse=True)
+        
+        for a in action_dict:
+            print('%8s %8.4f %8.4f %8d' % (a,self.qtable[str(a)]['qvalue'],\
+                                        self.qtable[str(a)]['sumvalue'],self.qtable[str(a)]['trials']))
+        print('-----------------')
+        print('%8s %8.4f %8s %8d' % ('Value',self.value,'Visits',self.visits) )
+        print('-----------------')
+
+class CANode(QNode):
+
+    def __init__(self, action, state, depth, parent=None):
+        super(CANode,self).__init__(action,state,depth,parent)
+        self.action = action
+        self.observation = None
+
+    def add_child(self, observation):
+        state = self.state.copy()
+        child = CONode(observation,state,self.depth+1,self)
+        self.children.append(child)
+        return child
+    
+    def get_child(self, observation):
+        for child in self.children:
+            if child.observation == observation:
+                return child
+        return None
+
+class CONode(CNode):
+
+    def __init__(self,observation, state, depth, parent=None):
+        super(CONode,self).__init__(None,state,depth,parent)
+        self.action = None
+        self.observation = observation
+        
+        self.particle_filter = []
+        self.particles_set = {}
+
+    def sample_new_action(self):
+        new_action = []
+        for ax in self.action_range:
+            low, high = ax[0],ax[1]
+            new_action.append(np.round(np.random.uniform(low,high),2))
+        return new_action
+
+    def select_action(self,coef={'ka':0.5,'alpha_a':0.5}, mode='pw'):
+        ka, alpha_a = coef['ka'], coef['alpha_a']
+        if len(self.children) <= ka*self.visits**alpha_a:
+            new_action = self.sample_new_action()
+            while new_action in self.actions:
+                new_action = self.sample_new_action()
+            next_state, reward, _, _ = self.state.step(new_action)
+            self.add_child(next_state, new_action)
+            self.qtable[str(new_action)] = {'qvalue':0.0,'sumvalue':0.0,'trials':0}
+        return ucb_select_action(self,c=0.5,mode='max')
+        
+    def add_child(self,state,action):
+        child = CANode(action,state,self.depth+1,self)
+        self.children.append(child)
+        return child
+
+    def get_child(self,action):
+        for child in self.children:
+            if child.action == action:
+                return child
+        return None

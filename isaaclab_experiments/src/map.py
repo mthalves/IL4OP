@@ -2,7 +2,6 @@ import math
 import matplotlib.pyplot as plt
 import matplotlib.patches as ptc
 import numpy as np
-import numpy.ma as ma
 from scipy.ndimage import distance_transform_edt
 
 def compute_dist(a,b):
@@ -35,7 +34,7 @@ def bresenham(x0, y0, x1, y1):
     return points
 
 
-class InflationMap:
+class DiscreteInflationMap:
 
     def __init__(
         self,

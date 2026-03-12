@@ -12,30 +12,16 @@ class IBPOMCP(object):
         self.max_depth = max_depth
         self.max_it = max_it
         
-        discount_factor = kwargs.get('discount_factor')
-        self.discount_factor = discount_factor\
-            if discount_factor is not None else 0.95
-
-        self.alpha = 0.5
-
-        ###
-        # POMCP enhancements
-        ###
-        # particle Revigoration (silver2010pomcp)
-        particle_revigoration = kwargs.get('particle_revigoration')
-        if particle_revigoration is not None:
-            self.pr = particle_revigoration
-        else: #default
-            self.pr = True
-
-        k = kwargs.get('k') # particle filter size
-        self.k = k if k is not None else 100
+        self.alpha                  = kwargs.get('alpha',0.5) # information weight (alves2023information)
+        self.discount_factor        = kwargs.get('discount_factor',0.95) # discount factor (historical weight)
+        self.particle_revigoration  = kwargs.get('particle_revigoration',True) # enable particle revigoration (silver2010pomcp)
+        self.k                      = kwargs.get('k', 100) # particle filter size
 
         self.state_distribution = {}
         self.state_entropy_hist = []
         self.state_entropy_var_hist = []
 
-        self.observation_distribution = {}
+        self.observation_distributsion = {}
 
     def simulate_action(self, node, action):
         # 1. Acting
@@ -190,7 +176,7 @@ class IBPOMCP(object):
             )
 
         # 3. Performing particle revigoration
-        if self.pr:
+        if self.particle_revigoration:
             particle_revigoration(state, problem, self.root, self.k, Px)
 
         # 4. Searching for the best action within the tree
