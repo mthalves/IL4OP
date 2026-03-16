@@ -2,37 +2,8 @@ import math
 import matplotlib.pyplot as plt
 import matplotlib.patches as ptc
 import numpy as np
-from scipy.ndimage import distance_transform_edt
 
-def compute_dist(a,b):
-    return math.hypot(a[0] - b[0], a[1] - b[1])
-
-def bresenham(x0, y0, x1, y1):
-    points = []
-    dx, dy = abs(x1 - x0), abs(y1 - y0)
-    x, y = x0, y0
-    sx, sy = 1 if x0 < x1 else -1, 1 if y0 < y1 else -1
-    if dx > dy:
-        err = dx / 2.0
-        while x != x1:
-            points.append((x, y))
-            err -= dy
-            if err < 0:
-                y += sy
-                err += dx
-            x += sx
-    else:
-        err = dy / 2.0
-        while y != y1:
-            points.append((x, y))
-            err -= dx
-            if err < 0:
-                x += sx
-                err += dy
-            y += sy
-    points.append((x1, y1))
-    return points
-
+from isaaclab_experiments.src.mapping.utils import bresenham, compute_dist, distance_transform_edt
 
 class DiscreteInflationMap:
 
@@ -76,9 +47,10 @@ class DiscreteInflationMap:
         self._fig, self._ax = None, None
         self._im = None
 
-    ###
-    ### SUPPORTIVE METHODS
-    ###
+    # -------------------------------------------------
+    # TRANSFORM/DISCRETIZATION
+    # -------------------------------------------------
+
     def map_to_world(self, x, y):
         """Converts map coordinates to world coordinates"""
         return x * self.resolution, y * self.resolution
@@ -92,6 +64,13 @@ class DiscreteInflationMap:
         x, y = pos
         return 0 <= x < self.map_size[0] and 0 <= y < self.map_size[1]
     
+    # -------------------------------------------------
+    # UTILITIES
+    # -------------------------------------------------
+
+    def is_free_space(self, pos):
+        return self.cost_map[pos[0], pos[1]] < 0.95*self.max_cost
+
     def is_visible(self, eye, obj, visibility_radius=np.inf, threshold=0.99):
         """Check if the object is visible based on the line between two world
          points. If the line passes through an inflated cost map cell (considering
@@ -109,9 +88,6 @@ class DiscreteInflationMap:
             if self.cost_map[x, y] > threshold*self.max_cost:
                 return False
         return True
-    
-    def is_free_space(self, pos):
-        return self.cost_map[pos[0], pos[1]] < 0.95*self.max_cost
 
     def compute_orientation(self, robot_pos, target_point):
         """Computes robot orientation given the map robot and target position"""
@@ -120,9 +96,10 @@ class DiscreteInflationMap:
         angle = math.atan2(y1 - y0, x1 - x0)
         return angle
 
-    ###
-    ### MAP GENERATION METHODS
-    ###
+    # -------------------------------------------------
+    # MAPPING
+    # -------------------------------------------------
+
     def update_with_lidar(self, robot_pos_w, lidar_hits_w, max_dist=None):
         """Updates cost map based on the world lidar hits and robot position"""
         rx, ry = self.world_to_map(*robot_pos_w)
@@ -172,9 +149,10 @@ class DiscreteInflationMap:
     def get_cost_map(self):
         return np.copy(self.cost_map)
 
-    ###
-    ### VISUALIZATION METHODS
-    ###    
+    # -------------------------------------------------
+    # VISUALIZATION
+    # -------------------------------------------------
+        
     def visualize(self, robot=None, path=None, tasks=None, memory_map=None, step=None):
         # Throttle
         if step is not None and step % 10 != 0:
@@ -225,7 +203,8 @@ class DiscreteInflationMap:
             self._colorbar = self._fig.colorbar(self._im, ax=self._ax, fraction=0.04, pad=0.04)
 
         # === Update overlays ===
-        self._im.set_data(viz_cost_map)
+        if self._im:
+            self._im.set_data(viz_cost_map)
         if viz_memory_map is not None:
             visited_mask = (viz_memory_map > 0)
             self._memory_overlay.set_data(visited_mask.astype(float))
@@ -242,14 +221,16 @@ class DiscreteInflationMap:
                     (mx, my), visibility_radius_px,
                     color='cyan', fill=False, linestyle='--', linewidth=1.5, alpha=0.7, zorder=5
                 )
-                self._ax.add_patch(self._visibility_circle)
+                if self._ax:
+                    self._ax.add_patch(self._visibility_circle)
             else:
                 self._visibility_circle.center = (mx, my)
 
             # Robot patch
             if self._robot_patch is None:
                 self._robot_patch = ptc.Circle((mx, my), radius_px, color='g', zorder=6)
-                self._ax.add_patch(self._robot_patch)
+                if self._ax:
+                    self._ax.add_patch(self._robot_patch)
             else:
                 self._robot_patch.center = (mx, my)
 

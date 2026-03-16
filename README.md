@@ -95,7 +95,7 @@ Publicly available to foster research! :sparkles:
 
 ## :computer: In development & Future directions
 
-- [ ] Single agent planning using discrete world and decision models.
+- [x] Single agent planning using discrete world and decision models.
 - [ ] Support planning algorithms with continuous world and decision models.
 - [ ] Extension of the single agent scenario to multi-agent problems (toilored to centralized and decentralized approaches).
 - [ ] Extension of IL4OP to support dynamic world models applications.

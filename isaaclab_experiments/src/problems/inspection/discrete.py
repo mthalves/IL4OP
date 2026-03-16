@@ -1,8 +1,10 @@
+import copy
 import numpy as np
 import operator
 import random as rd
 
-from isaaclab_experiments.src.map import DiscreteInflationMap, compute_dist
+from isaaclab_experiments.src.mapping.discrete import DiscreteInflationMap
+from isaaclab_experiments.src.mapping.utils import compute_dist
 
 class DiscreteInspectionProblemState:
 
@@ -20,7 +22,7 @@ class DiscreteInspectionProblemState:
         self.map = inf_map
         
         self.actions_dict = actions_dict
-        self.actions = [act for act in self.actions_dict]
+        self.actions = list(actions_dict.keys())
 
         self.tasks_found = tasks_found
         self.max_inspection = max_inspection
@@ -29,28 +31,34 @@ class DiscreteInspectionProblemState:
 
         self.visibility_radius = visibility_radius
 
-    def get_closest_visible_task(self, state):
-        task_name, task_dist = None, np.inf
+    # -------------------------------------------------
+    # TASK UTILITIES
+    # -------------------------------------------------
 
-        # finding the closest task
-        for tname in state.tasks_found:
-            tpos = state.tasks_found[tname]
-            task_is_visible = self.map.is_visible(state.agent_pos,tpos, self.visibility_radius)
-            if task_is_visible:
-                tmp_task_dist = compute_dist(state.agent_pos,tpos)
-                if tmp_task_dist < task_dist:
-                    task_dist = tmp_task_dist
+    def get_closest_visible_task(self):
+        task_name, task_dist = None, np.inf
+        for tname, tpos in self.tasks_found.items():
+            if self.map.is_visible(self.agent_pos, tpos, self.visibility_radius):
+                d = compute_dist(self.agent_pos, tpos)
+                if d < task_dist:
                     task_name = tname
-        
+                    task_dist = d
         return task_name, task_dist
         
+    # -------------------------------------------------
+    # STEP
+    # -------------------------------------------------
+
     def step(self, action):
-        reward = 0.
+        reward = 0.0
         next_state = self.copy() # next state is initially a copy of the current state
 
+        # -------------------------
+        # 1. INSPECTION ACTION
+        # -------------------------
         # if action is the inspection action, calculate inspection reward
         if action == 'X':
-            task_name, task_dist = self.get_closest_visible_task(next_state)
+            task_name, task_dist = next_state.get_closest_visible_task()
                         
             # - if there is no visible task, return next state with no reward
             if task_name is None:
@@ -63,20 +71,37 @@ class DiscreteInspectionProblemState:
                     reward += 1#/(min_dist + 1e-6)
                     next_state.inspection_counter[task_name] += 1
 
+        # -------------------------
+        # 2. NAVIGATION ACTION
+        # -------------------------
         # if action is a navigation action, calculate the new position
         else:
             pos = next_state.agent_pos
-            new_pos = (\
-                int(pos[0]+self.actions_dict[action][0]),\
-                int(pos[1]+self.actions_dict[action][1]))
+            dx, dy = self.actions_dict[action]
+            new_pos = (
+                int(pos[0] + dx),
+                int(pos[1] + dy)
+            )
             if self.map.is_in_bounds(new_pos) and self.map.is_free_space(new_pos) \
             and new_pos not in self.tasks_found.values():
                 next_state.agent_pos = new_pos
+
         return next_state, reward, None, None
     
+    # -------------------------------------------------
+    # TERMINATION
+    # -------------------------------------------------
+
     def is_final_state(self):
         # if all tasks were inspected, the game ended
-        return all([c > 0 for c in self.inspection_counter.values()])
+        return all(
+            c >= self.max_inspection
+            for c in self.inspection_counter.values()
+        )
+
+    # -------------------------------------------------
+    # TRANSITION / OBSERVATION (for planners)
+    # -------------------------------------------------
 
     def get_trans_p(self,action):
         return [self.copy(),1]
@@ -84,6 +109,10 @@ class DiscreteInspectionProblemState:
     def get_obs_p(self,action):
         return [self.get_observation(),1]
         
+    # -------------------------------------------------
+    # OBSERVATION MODEL
+    # -------------------------------------------------
+
     def get_observation(self):
         """Get the state obsevation"""
         obs = []
@@ -91,9 +120,7 @@ class DiscreteInspectionProblemState:
 
         # Get tasks observation
         # - Task observation = list of [task name, x position, y position]
-        for tname in self.tasks_found:
-            # close 5m
-            tpos = self.tasks_found[tname]
+        for tname, tpos in self.tasks_found.items():
             if self.map.is_visible(pos, tpos, self.visibility_radius):
                 obs.append([tpos[0],tpos[1]])
         return obs
@@ -109,25 +136,32 @@ class DiscreteInspectionProblemState:
                 return False
         return True
 
+    # -------------------------------------------------
+    # HASHING (important for planners)
+    # -------------------------------------------------
+
     def hash_state(self):
         return hash(str((self.agent_pos[0],self.agent_pos[1])))
     
     def hash_observation(self):
         obs = self.get_observation()
-        return hash(str(obs))
+        return hash(str(tuple(sorted(obs))))
     
+    # -------------------------------------------------
+    # COPY
+    # -------------------------------------------------
+
     def copy(self):
-        copied_state = DiscreteInspectionProblemState(
-            (self.agent_pos[0], self.agent_pos[1]),
-            self.map,
-            self.actions_dict,
-            self.tasks_found.copy(),
-            self.inspection_counter.copy(),
-            self.max_inspection,
-            self.max_inspection_dist,
-            self.visibility_radius
+        return DiscreteInspectionProblemState(
+            agent_pos=(self.agent_pos[0], self.agent_pos[1]),
+            inf_map=self.map,
+            actions_dict=self.actions_dict,
+            tasks_found=copy.deepcopy(self.tasks_found),
+            inspection_counter=copy.deepcopy(self.inspection_counter),
+            max_inspection=self.max_inspection,
+            max_inspection_dist=self.max_inspection_dist,
+            visibility_radius=self.visibility_radius,
         )
-        return copied_state
 
 class DiscreteInspectionProblem:
 
@@ -182,6 +216,11 @@ class DiscreteInspectionProblem:
         self.last_target_point, self.last_target_dir = None, None
         self.last_vis_pos = None
 
+
+    # -------------------------------------------------
+    # TERMINATION
+    # -------------------------------------------------
+
     def completed_all_tasks(self):
         completed = []
         for task_name in self.tasks:
@@ -201,9 +240,10 @@ class DiscreteInspectionProblem:
 
         self.last_target_point, self.last_target_dir = None, None
     
-    ###
-    ### PLANNING METHODS
-    ###
+    # -------------------------------------------------
+    # VISION
+    # -------------------------------------------------
+
     def update_knowledge(self, agent_pos_w, lidar_readings):
         agent_pos = self.map.world_to_map(*agent_pos_w[:2])
         # checking if agent's vision has changed significantly
@@ -242,6 +282,10 @@ class DiscreteInspectionProblem:
                     print('Task found:', tname, 'at', tpos, 'from', agent_pos)
                     self.tasks_found[tname] = tpos
                     self.inspection_counter[tname] = 0
+
+    # -------------------------------------------------
+    # REASONING
+    # -------------------------------------------------
 
     def get_current_state(self, agent_pos):
         state = DiscreteInspectionProblemState(\
@@ -285,6 +329,10 @@ class DiscreteInspectionProblem:
                 
         return sampled_state
     
+    # -------------------------------------------------
+    # NAVIGATION
+    # -------------------------------------------------
+
     def translate_actions2path(self, agent, action_sequence):
         translated_path = []
         agent_pos = agent['pos']
@@ -315,6 +363,10 @@ class DiscreteInspectionProblem:
 
         return translated_path
     
+    # -------------------------------------------------
+    # DECISION MAKING AND ACTIONS
+    # -------------------------------------------------
+
     def compute_next_action(self, agent, path, action_sequence, planner_name):
         # Helper: remove the current step from path and action sequence
         def pop_step():
