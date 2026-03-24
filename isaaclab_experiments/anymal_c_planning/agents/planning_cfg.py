@@ -52,13 +52,18 @@ CONTINUOUS_AGENT_CFG = {
         "max_it":1000,
         "kwargs":{},
     },
+    "pftdpw":{
+        "max_depth":20,
+        "max_it":1000,
+        "kwargs":{},
+    }
 }
 
 """
     Select your execution/planning method changing the bellow lines
 """
 DISCRETE_METHOD   = "ibpomcp"
-CONTINUOUS_METHOD = "pomcpow"
+CONTINUOUS_METHOD = "pomcpdpw"
 
 DISCRETE_AGENT = {
     "name":DISCRETE_METHOD,

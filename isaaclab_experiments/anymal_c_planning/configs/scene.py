@@ -158,7 +158,10 @@ class UShapedCfg(InteractiveSceneCfg):
             "/World/envs/env_.*/south_wall",\
             "/World/envs/env_.*/east_wall",\
             "/World/envs/env_.*/west_wall",\
-            "/World/envs/env_.*/center_block",],
+            "/World/envs/env_.*/center_block",\
+            "/World/envs/env_.*/box_1",\
+            "/World/envs/env_.*/box_2",\
+            "/World/envs/env_.*/box_3",],
     )
     
     # lights
@@ -243,7 +246,7 @@ class UShapedCfg(InteractiveSceneCfg):
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.73, 0.23, 0.23), metallic=0.2),
             physics_material=sim_utils.RigidBodyMaterialCfg()
         ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(15, 14, 0.5)),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(15.5, 14.5, 0.5)),
     )
     box_2 = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/box_2",

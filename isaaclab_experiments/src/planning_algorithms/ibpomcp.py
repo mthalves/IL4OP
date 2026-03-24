@@ -1,4 +1,5 @@
-from isaaclab_experiments.src.planning_algorithms.node import IANode, IONode
+from isaaclab_experiments.src.planning_algorithms.node import IANode, IONode, \
+                            find_new_information_root, informative_particle_revigoration
 
 import random
 
@@ -171,95 +172,16 @@ class IBPOMCP(object):
         # or advancing within the existent tree
         else:
             print('<!> Advancing within the existent tree')
-            self.root, Px = find_new_PO_root(
+            self.root, Px = find_new_information_root(
                 state, previous_action, observation, self.root
             )
 
         # 3. Performing particle revigoration
         if self.particle_revigoration:
-            particle_revigoration(state, problem, self.root, self.k, Px)
+            informative_particle_revigoration(state, problem, self.root, self.k, Px)
 
         # 4. Searching for the best action within the tree
         print('P> Starting the search for the best action')
         best_action = self.search(self.root, problem)
         self.root.show_qtable()
         return [best_action]
-
-###
-# POMCP's proposed modification 
-###
-# POMCP uses find_new_PO_root from node.py module
-# > from src.reasoning.node import find_new_PO_root
-def find_new_PO_root(
- current_state, previous_action, current_observation, previous_root
-) -> tuple[IONode, float]:
-    # 1. If the root doesn't exist yet, create it
-    # - NOTE: The root is always represented as an "observation node" since the 
-    # next node must be an action node.
-    Px = 0
-    if previous_root is None:
-        new_root = IONode(observation=None,state=current_state,depth=0,parent=None)
-        print('<!> Creating new root node: no previous root found')
-        return new_root, Px
-
-    # 2. Else, walk on the tree to find the new one (giving the previous information)
-    action_node, observation_node, new_root = None, None, None
-
-    # a. walking over action nodes
-    for child in previous_root.children:
-        if child.action == previous_action:
-            action_node = child
-            break
-
-    # - if we didn't find the action node, create a new root
-    if action_node is None:
-        new_root = IONode(observation=None,state=current_state,depth=0,parent=None)
-        print('<!> Creating new root node: no action node found')
-        print('<!> Previous action:', previous_action)
-        return new_root, Px
-
-    # b. walking over observation nodes
-    for child in action_node.children:
-        obs = child.observation
-        if child.state.observation_is_equal(obs, current_observation):
-            observation_node = child
-            break
-
-    # - if we didn't find the action node, create a new root
-    if observation_node is None:
-        new_root = IONode(observation=None,state=current_state,depth=0,parent=None)
-        print('<!> Creating new root node: no observation node found')
-        return new_root, Px
-
-    # 3. Definig the new root and updating the depth
-    new_root = observation_node
-    Px = new_root.visits/previous_root.visits
-    new_root.parent = None
-    new_root.update_depth(0)
-    print('<y> Walking on the tree to find the new root node')
-    return new_root, Px
-
-# POMCP uses particle_revigoration from node.py module
-# > from src.reasoning.node import particle_revigoration
-def particle_revigoration(state, problem, root, k, Px):
-    # 1. Copying the current root particle filter
-    current_particle_filter = []
-    for particle in root.particle_filter:
-        current_particle_filter.append(particle)
-    Px =  Px if len(current_particle_filter) > 1 else 0.0
-    
-    # 2. Reinvigorating particles for the new particle filter or
-    # picking particles from the uniform distribution
-    root.particle_filter = []
-    particle_counter = 0
-    while(particle_counter < (Px)*k):
-        particle = random.sample(current_particle_filter,1)[0]
-        root.particle_filter.append(particle)
-        particle_counter += 1
-        
-
-    particle_counter = 0
-    while(particle_counter < (1-Px)*k):
-        particle = problem.sample_state(state)
-        root.particle_filter.append(particle)
-        particle_counter += 1
