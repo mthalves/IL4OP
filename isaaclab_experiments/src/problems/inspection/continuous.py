@@ -42,7 +42,12 @@ class ContinuousInspectionProblemState:
     def get_closest_visible_task(self):
         task_name, task_dist = None, np.inf
         for tname, tpos in self.tasks_found.items():
-            if self.map.is_visible(self.agent_pos, tpos, self.visibility_radius):
+            if self.map.is_task_visible(tname):
+                d = compute_dist(self.agent_pos, tpos)
+                if d < task_dist:
+                    task_name = tname
+                    task_dist = d
+            elif self.map.is_visible(self.agent_pos, tpos, self.visibility_radius):
                 d = compute_dist(self.agent_pos, tpos)
                 if d < task_dist:
                     task_name = tname
@@ -93,56 +98,53 @@ class ContinuousInspectionProblemState:
                 int(pos[1] + dy),
             )
             # collision check via costmap
-            if self.map.cost(new_pos) < 0.7 * self.map.max_cost:
+            if self.map.cost(new_pos) < self.map.eta * self.map.max_cost:
                 next_state.agent_pos = new_pos
 
         return next_state, reward, None, None
     
 
-
     def sample_new_action(self):
-
         px, py = self.agent_pos
-        step = self.map.resolution
+        max_global = np.max([self.action_range[0][1], self.action_range[1][1]])
 
-        # ----------------------------------------
-        # helper: scan until obstacle
-        # ----------------------------------------
+        angle = np.random.uniform(0, 2 * np.pi)
+        dx = np.cos(angle)
+        dy = np.sin(angle)
 
-        def find_limit(dx, dy):
+        norm = np.hypot(dx, dy) + 1e-8
+        dx /= norm
+        dy /= norm
 
-            dist = 0.0
-            max_dist = self.action_range[0][1]
+        step = self.map.resolution / 4.0
+        dist = 0.0
+        max_safe = 0.0
 
-            while dist < max_dist:
+        cost_threshold = self.map.eta * self.map.max_cost
+        while dist < max_global:
 
-                nx = px + dx * dist
-                ny = py + dy * dist
+            nx = px + dx * dist
+            ny = py + dy * dist
 
-                # stop when hitting obstacle
-                if self.map.sdf((nx, ny)) <= self.map.robot_radius:
-                    break
+            mx, my = self.map.world_to_map(nx, ny)
+            if not self.map.is_in_bounds((mx, my)):
+                break
 
-                dist += step
+            cost = self.map.cost((nx, ny))
+            if cost > cost_threshold:
+                break
 
-            return max(0.0, dist - step)  # last valid point
+            if not self.map.is_visible((px, py), (nx, ny), self.visibility_radius):
+                break
 
-        # ----------------------------------------
-        # compute limits
-        # ----------------------------------------
+            max_safe = dist
+            dist += step
 
-        max_x_pos = find_limit(+1, 0)
-        max_x_neg = find_limit(-1, 0)
-        max_y_pos = find_limit(0, +1)
-        max_y_neg = find_limit(0, -1)
+        if max_safe <= self.map.resolution:
+            return [0.0, 0.0]
 
-        # ----------------------------------------
-        # sample uniformly (NO bias)
-        # ----------------------------------------
-
-        dx = np.random.uniform(-max_x_neg, max_x_pos)
-        dy = np.random.uniform(-max_y_neg, max_y_pos)
-        return [np.round(dx, 2), np.round(dy, 2)]
+        dist = np.random.uniform(self.map.resolution, max_safe)
+        return [np.round(dist * dx, 2), np.round(dist * dy, 2)]
 
     # -------------------------------------------------
     # TERMINATION
@@ -182,7 +184,9 @@ class ContinuousInspectionProblemState:
         # Get tasks observation
         # - Task observation = list of [task name, x position, y position]
         for tname, tpos in self.tasks_found.items():
-            if self.map.is_visible(pos, tpos, self.visibility_radius):
+            if self.map.is_task_visible(tname):
+                obs.append([tpos[0],tpos[1]])
+            elif self.map.is_visible(pos, tpos, self.visibility_radius):
                 obs.append([tpos[0],tpos[1]])
         return obs
 
@@ -209,7 +213,7 @@ class ContinuousInspectionProblemState:
         else:
             res = self.map.resolution
             qx = int(state.agent_pos[0] / res)
-            qy = int(self.agent_pos[1] / res)
+            qy = int(state.agent_pos[1] / res)
         return hash(str((qx, qy)))
 
     def hash_observation(self, obs=None):
@@ -257,7 +261,7 @@ class ContinuousInspectionProblem:
         z_min                   : float=0.1,
         z_max                   : float=1.0,
         confirm_threshold       : int  =2,
-        inscribed_radius        : float=0.25,
+        robot_radius            : float=0.25,
         inflation_radius        : float=0.6,
         cost_scaling_factor     : float=10.0,
         visibility_radius       : float=7.0,
@@ -272,7 +276,7 @@ class ContinuousInspectionProblem:
             z_min,
             z_max,
             confirm_threshold,
-            inscribed_radius,
+            robot_radius,
             inflation_radius,
             cost_scaling_factor
         )
@@ -325,21 +329,23 @@ class ContinuousInspectionProblem:
     # VISION / KNOWLEDGE
     # -------------------------------------------------
 
-    def update_knowledge(self, agent_pos_w, lidar_readings):
+    def update_knowledge(self, agent_pos_w, lidar_readings, lidar_meshes):
         agent_pos_w = agent_pos_w[:2]
         # checking if agent's vision has changed significantly
         # - if it doesn't, do not update
         if self.last_vis_pos is not None:
-            if compute_dist(agent_pos_w, self.last_vis_pos) < self.map.resolution:
+            if compute_dist(agent_pos_w, self.last_vis_pos) < self.map.robot_radius_w:
                 return
 
         self.last_vis_pos = agent_pos_w
 
         # updating map knowledge
-        self.map.update_with_lidar(agent_pos_w, lidar_readings, max_dist=self.visibility_radius)
+        self.map.update_with_lidar(agent_pos_w, \
+            lidar_readings, lidar_meshes=lidar_meshes, \
+            max_dist=self.visibility_radius)
 
+        # calculating the visibility area
         cx, cy = self.map.world_to_map(*agent_pos_w)
-
         r = int(self.visibility_radius / self.map.resolution)
 
         xmin = max(0, cx - r)
@@ -347,17 +353,21 @@ class ContinuousInspectionProblem:
         ymin = max(0, cy - r)
         ymax = min(self.map.map_size[1], cy + r + 1)
 
+        # updating mamory map
         for x in range(xmin, xmax):
             for y in range(ymin, ymax):
-
-                cell_w = self.map.map_to_world(x + 0.5, y + 0.5)
-
+                cell_w = self.map.map_to_world(x, y)
                 if self.map.is_visible(agent_pos_w, cell_w, self.visibility_radius):
                     self.memory_map[x, y] = 1
 
         # detect tasks
         for tname, tpos in self.tasks.items():
-            if self.map.is_visible(agent_pos_w, tpos, self.visibility_radius):
+            if self.map.is_task_visible(tname):
+                if tname not in self.tasks_found:
+                    print("Task found:", tname, 'at', tpos)
+                    self.tasks_found[tname] = tpos
+                    self.inspection_counter[tname] = 0
+            elif self.map.is_visible(agent_pos_w, tpos, self.visibility_radius):
                 if tname not in self.tasks_found:
                     print("Task found:", tname, 'at', tpos)
                     self.tasks_found[tname] = tpos
@@ -393,7 +403,7 @@ class ContinuousInspectionProblem:
             for y in range(self.map.map_size[1]):
                 if self.memory_map[x, y] == 0:
                     pos_w = self.map.map_to_world(x + 0.5, y + 0.5)
-                    if self.map.sdf(pos_w) > self.map.robot_radius:
+                    if self.map.cost(pos_w) < self.map.eta * self.map.max_cost:
                         free_spaces.append(pos_w)
         return free_spaces
 
@@ -428,11 +438,13 @@ class ContinuousInspectionProblem:
             else:
                 dx, dy = a
             new_pos = (pos[0] + dx, pos[1] + dy)
+            mnew_pos = self.map.world_to_map(*new_pos)
 
-            if self.map.sdf(new_pos) > self.map.robot_radius:
-                pos = new_pos
-
-            translated_path.append(pos)
+            if self.map.sdf(new_pos) > self.map.robot_radius_w and \
+            self.map.is_in_bounds(mnew_pos):
+                translated_path.append(new_pos)
+            else:
+                translated_path.append(pos)
 
         return translated_path
 
@@ -471,31 +483,62 @@ class ContinuousInspectionProblem:
 
         # otherwise, calculate the next point
         else:
-            # checking if the robot is close to the current target position (reached the target position)
-            current_target_pos = path[0]
-            if compute_dist(agent_pos, current_target_pos) < self.map.resolution:
-                pop_step()
-            
-            # if there is still further points to reach, define the target point
-            if len(path) > 0:
-                target_point = path[0]
-            # otherwise, define it as the last target
-            else:
+            # === Handling task inspection ===
+            if action_sequence[0] == 'X':
                 target_point = self.last_target_point
+                target_dir = self.last_target_dir 
 
-            # updating the agent's  target direction/orientation
-            # if the target point changed, re calculate the orientation
-            if self.last_target_point != target_point:
-                target_dir = self.map.compute_orientation(
-                    self.last_target_point,
-                    target_point
-                )
-            # otherwise, keep the same
+                # Handle task inspection
+                if self.tasks_found:
+                    # getting closest task to inspect
+                    tasks_dist, task_name = np.inf, None
+                    for tname in self.tasks_found:
+                        tpos = self.tasks_found[tname]
+                        tmp_tasks_dist = compute_dist(agent['pos'], tpos)
+                        if tmp_tasks_dist < tasks_dist:
+                            tasks_dist = tmp_tasks_dist
+                            task_name = tname
+
+                    # checking inspection condition
+                    print('Trying to inspect task',task_name,'at dist=',tasks_dist)
+                    print('> Tasks inspection counter:',self.inspection_counter)
+                    print('> Inspection done:',tasks_dist <= self.max_inspection_distance)
+                    if tasks_dist <= self.max_inspection_distance:
+                        # Increment inspection count
+                        self.inspection_counter[task_name] += 1
+                        if self.inspection_counter[task_name] <= self.max_inspection:
+                            info['reward'] += 1
+
+                    print('> Updated inspection counter:',self.inspection_counter)
+                pop_step() 
+
+            # === Handling navigation ===
             else:
-                target_dir = self.last_target_dir
+                # checking if the robot is close to the current target position 
+                # (reached the target position)
+                current_target_pos = path[0]
+                if compute_dist(agent_pos, current_target_pos) < self.map.robot_radius_w:
+                    pop_step()
+                
+                # if there is still further points to reach, define the target point
+                if len(path) > 0:
+                    target_point = path[0]
+                # otherwise, define it as the last target
+                else:
+                    target_point = self.last_target_point
 
-            # updating the agent's action memory
-            self.last_target_point = target_point
-            self.last_target_dir = target_dir
+                # updating the agent's  target direction/orientation
+                # if the target point changed, re calculate the orientation
+                if self.last_target_point != target_point:
+                    target_dir = self.map.compute_orientation(
+                        self.last_target_point,
+                        target_point
+                    )
+                # otherwise, keep the same
+                else:
+                    target_dir = self.last_target_dir
 
+        # updating the agent's action memory
+        self.last_target_point = target_point
+        self.last_target_dir = target_dir
         return target_point, target_dir, action_sequence, info

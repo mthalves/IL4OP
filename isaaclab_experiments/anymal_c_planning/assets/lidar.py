@@ -23,7 +23,6 @@ from isaaclab.utils.math import convert_quat, quat_apply
 from isaaclab.utils.warp import convert_to_warp_mesh, raycast_mesh
 
 from isaaclab.sensors import SensorBase, RayCasterData, RayCasterCfg
-from isaaclab.sensors.ray_caster.ray_caster_data import RayCasterData
 
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers.
 # All rights reserved.
@@ -42,6 +41,7 @@ from isaaclab.markers.visualization_markers import VisualizationMarkersCfg
 
 from isaaclab.sensors.ray_caster.patterns.patterns_cfg import PatternBaseCfg
 
+from isaaclab_experiments.anymal_c_planning.assets.lidar_data import BetterRayCasterData
 
 RAY_CASTER_MARKER_CFG = VisualizationMarkersCfg(
     markers={
@@ -139,7 +139,7 @@ class BetterRayCaster(SensorBase):
         # Initialize base class
         super().__init__(cfg)
         # Create empty variables for storing output data
-        self._data = RayCasterData()
+        self._data = BetterRayCasterData()
         # the warp meshes used for raycasting.
         self.points: dict[str, UsdGeom.Mesh] = {}
         self._views = {}
@@ -315,6 +315,9 @@ class BetterRayCaster(SensorBase):
         self._data.ray_hits_w = torch.zeros(
             self._view.count, self.num_rays, 3, device=self._device
         )
+        self._data.ray_hit_mesh_ids = torch.zeros(
+            self._view.count, self.num_rays, dtype=torch.long, device=self._device
+        )
         self.ray_starts_w = torch.zeros(
             self._view.count, self.num_rays, 3, device=self._device
         )
@@ -406,9 +409,16 @@ class BetterRayCaster(SensorBase):
         min_indices = torch.argmin(dists, dim=1)
         min_indices_expanded = min_indices.unsqueeze(-1).expand(-1, -1, 3)
 
+        self._data.ray_hit_mesh_ids[env_ids] = min_indices
         self._data.ray_hits_w[env_ids] = torch.gather(
             hits, dim=1, index=min_indices_expanded.unsqueeze(1)
         ).squeeze(1)
+
+        self.mesh_names = []
+        for env_id in env_ids: 
+            self.mesh_names.append(list())
+            for mesh_id in self._data.ray_hit_mesh_ids[env_id]:
+                self.mesh_names[-1].append(list(self.wp_meshes.keys())[mesh_id])
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers

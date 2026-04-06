@@ -161,7 +161,8 @@ class UShapedCfg(InteractiveSceneCfg):
             "/World/envs/env_.*/center_block",\
             "/World/envs/env_.*/box_1",\
             "/World/envs/env_.*/box_2",\
-            "/World/envs/env_.*/box_3",],
+            "/World/envs/env_.*/box_3",\
+        ],
     )
     
     # lights

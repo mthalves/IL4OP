@@ -11,6 +11,8 @@ import multiprocessing as mp
 import torch
 import traceback
 
+from isaaclab_experiments.src.mapping.utils import compute_dist
+
 class OnlinePlanning(ManagerTermBase):
 
     available_planning_algorithms = {
@@ -52,13 +54,14 @@ class OnlinePlanning(ManagerTermBase):
         self.update = False
 
         # Launching planning
+        self.shutdown_event = mp.Event()
         self.plan_req_q = mp.Queue(maxsize=1)
         self.plan_res_q = mp.Queue(maxsize=1)
 
         self.planner_proc = mp.Process(
             target=self.planner_worker,
-            args=(self.plan_req_q, self.plan_res_q),
-            daemon=True,
+            args=(self.plan_req_q, self.plan_res_q, self.shutdown_event),
+            #daemon=True,
         )
         self.planner_proc.start()
 
@@ -109,17 +112,45 @@ class OnlinePlanning(ManagerTermBase):
         print('Importing planner:',self.planner_name)
         return method
 
-    def planner_worker(self, req_q, res_q):
-        while True:
-            msg = req_q.get()
+    def planner_worker(self, req_q, res_q, shutdown_event, timeout=3.0):
+        while not shutdown_event.is_set():
+            try:
+                msg = req_q.get(timeout=timeout)
+            except:
+                continue
+
             if msg is None:
                 break
 
             agent, problem_env = msg
-            action_sequence = self.planner.plan(agent, problem_env)
-            path = problem_env.translate_actions2path(agent, action_sequence)
+            try:
+                action_sequence = self.planner.plan(agent, problem_env)
+                path = problem_env.translate_actions2path(agent, action_sequence)
+                res_q.put((action_sequence, path))
+            except Exception as e:
+                print("Planner worker error:", e)
 
-            res_q.put((action_sequence, path))
+    def shutdown(self):
+        print("Shutting down planner process...")
+        if hasattr(self, "shutdown_event"):
+            self.shutdown_event.set()
+
+        if hasattr(self, "plan_req_q"):
+            try:
+                self.plan_req_q.put_nowait(None)
+            except:
+                pass
+
+        if hasattr(self, "planner_proc"):
+            self.planner_proc.join(timeout=2)
+
+            if self.planner_proc.is_alive():
+                print("Force killing planner process...")
+                self.planner_proc.terminate()
+                self.planner_proc.join()
+
+        self.plan_req_q.close()
+        self.plan_res_q.close()
 
     def __call__(self, env: ManagerBasedEnv, env_ids: torch.Tensor | None,
          planning_method: dict = {},
@@ -133,6 +164,7 @@ class OnlinePlanning(ManagerTermBase):
         robot_pos_w = (root_pos[0], root_pos[1])
         robot_heading = robot.data.heading_w[0].cpu().numpy()
         lidar_readings_w = env.scene[lidar_cfg.name].data.ray_hits_w[0]
+        lidar_meshes = env.scene[lidar_cfg.name].mesh_names[0]
 
         # Planning information
         current_state = self.problem_env.get_current_state(robot_pos_w)
@@ -149,7 +181,7 @@ class OnlinePlanning(ManagerTermBase):
         # === PLANNING ===
         # =============================
         # Updating knwoledge with real world information
-        self.problem_env.update_knowledge(robot_pos_w, lidar_readings_w)
+        self.problem_env.update_knowledge(robot_pos_w, lidar_readings_w, lidar_meshes)
 
         # if no action sequence, plan a new one
         self.update = (len(self.action_sequence) == 0 or self.planner_name == 'astar')
@@ -167,12 +199,12 @@ class OnlinePlanning(ManagerTermBase):
             self.action_sequence, self.path = self.plan_res_q.get()
             self.planning_in_progress = False
 
-            print(self.action_sequence)
             for action in self.action_sequence:
                 self.action_history.append(action)
 
             print("Action sequence received:", self.action_sequence)
             print("Translated path:", self.path)
+            print("Next step distance:", compute_dist(agent['pos'], self.path[0]) if len(self.path) > 0 else "N/A")
 
         # ===========================
         # === COMMAND SETTING ===

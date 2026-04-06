@@ -48,38 +48,43 @@ def main():
     log = LogFile(problem_name,scenario_name,planner_name,args_cli.exp_num,header) \
         if args_cli.log else None
 
-    start_t = time.time()
-    while simulation_app.is_running() and (time.time() - start_t) < env.termination_manager.cfg.max_time:
-        hlobs = get_high_level_obs(obs)
-        llcmd = HLPOLICY(hlobs)
-        
-        # forcing straight walk
-        env.command_manager._terms['base_velocity'].vel_command_b = llcmd
-        llobs = get_low_level_obs(obs, llcmd)
-        actions = LLPOLICY(llobs)
-
-        obs, rewards, terminated, truncated, extras = \
-            env.step(actions.to(env.device))
-
-        if env.event_manager.cfg.planning.func.update:
-            cur_time = (time.time() - start_t)
-            last_reward = env.event_manager.cfg.planning.func.last_reward \
-                if not terminated and not truncated else -1
-            last_time2reason = env.event_manager.cfg.planning.func.last_time2reason
-            data = {'time':cur_time,
-                    'reward':last_reward,
-                    'time2reason':last_time2reason}
+    try:
+        start_t = time.time()
+        while simulation_app.is_running() and (time.time() - start_t) < env.termination_manager.cfg.max_time:
+            hlobs = get_high_level_obs(obs)
+            llcmd = HLPOLICY(hlobs)
             
-            if log: log.write(data)
+            # forcing straight walk
+            env.command_manager._terms['base_velocity'].vel_command_b = llcmd
+            llobs = get_low_level_obs(obs, llcmd)
+            actions = LLPOLICY(llobs)
 
-        if CAMERA_FOLLOW_ROBOT:
-            update_camera(env)
-        
-        problem_end = env.event_manager.cfg.planning.func.problem_env.completed_all_tasks()
-        if terminated or truncated or problem_end:
-            break
-    print('Experiment finished after %.1f seconds'%(time.time() - start_t))
-    env.close()
+            obs, rewards, terminated, truncated, extras = \
+                env.step(actions.to(env.device))
+
+            if env.event_manager.cfg.planning.func.update:
+                cur_time = (time.time() - start_t)
+                last_reward = env.event_manager.cfg.planning.func.last_reward \
+                    if not terminated and not truncated else -1
+                last_time2reason = env.event_manager.cfg.planning.func.last_time2reason
+                data = {'time':cur_time,
+                        'reward':last_reward,
+                        'time2reason':last_time2reason}
+                
+                if log: log.write(data)
+
+            if CAMERA_FOLLOW_ROBOT:
+                update_camera(env)
+            
+            problem_end = env.event_manager.cfg.planning.func.problem_env.completed_all_tasks()
+            if terminated or truncated or problem_end:
+                break
+        print('Experiment finished after %.1f seconds'%(time.time() - start_t))
+        env.close()
+    except KeyboardInterrupt:
+        print("Interrupted by user")
+    finally:
+        env.event_manager.cfg.planning.func.shutdown()
 
 if __name__ == "__main__":
     main()

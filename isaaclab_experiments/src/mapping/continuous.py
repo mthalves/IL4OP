@@ -40,13 +40,15 @@ class ContinuousInflationMap:
         self.robot_radius           = int(robot_radius / self.resolution)
 
         # Discretized Maps
+        self.hit_count_map = np.zeros(self.map_size, dtype=np.int16)
         self.obstacle_map           = np.zeros(self.map_size, dtype=np.uint8)
         self.sdf_map                = np.zeros(self.map_size, dtype=np.float32)
 
         # Inflation map info
         self.inflation_radius       = int(inflation_radius / self.resolution)
         self.cost_scaling_factor    = cost_scaling_factor
-        self.max_cost               = 254
+        self.max_cost               = 255
+        self.eta                    = 0.95 # collision cost threshold (as a fraction of max cost)   
 
         # Navigation gradients (spatial gradient)
         self.grad_x = None
@@ -55,9 +57,11 @@ class ContinuousInflationMap:
         # -------------------------------------------------
         # UTILS
         # -------------------------------------------------
+        self.objects_identified = []
         self._fig = None
 
     def reset(self):
+        self.hit_count_map[:] = 0
         self.obstacle_map[:] = 0
         self.sdf_map[:] = 0
         self.grad_x = None
@@ -90,49 +94,64 @@ class ContinuousInflationMap:
     # MAPPING
     # -------------------------------------------------
 
-    def update_with_lidar(self, robot_pos_w, lidar_readings, max_dist=None):
+    def update_with_lidar(self, robot_pos_w, lidar_readings, lidar_meshes=None, max_dist=None):
         rx, ry = robot_pos_w
-        x0, y0 = self.world_to_map(rx, ry)
-
+        max_dist = max_dist if max_dist is not None \
+         else 0.5 * math.sqrt(self.map_size_w[0]**2 + self.map_size_w[1]**2)
         for hx, hy, hz in lidar_readings.cpu().numpy():
-
-            if not np.isfinite(hx) or not np.isfinite(hy):
-                continue
-            if not (self.z_min <= hz <= self.z_max):
-                continue
-
+            # calculating support variables (direction and distance)
             dx = hx - rx
             dy = hy - ry
             dist = math.sqrt(dx * dx + dy * dy)
 
-            if max_dist is not None and dist > max_dist:
-                scale = max_dist / dist
-                hx = rx + dx * scale
-                hy = ry + dy * scale
-                dist = max_dist
-
-            x1, y1 = self.world_to_map(hx, hy)
-
-            for x, y in bresenham(x0, y0, x1, y1):
-
+            # -------------------------------------------------
+            # Skip invalid readings
+            # -------------------------------------------------
+            # - finite reading
+            if not np.isfinite(hx) or not np.isfinite(hy):
+                continue
+            # - reliable height reading
+            if not (self.z_min <= hz <= self.z_max):
+                continue
+            # - minimum range condition (avoiding using hits on the robot)
+            if dist <= self.robot_radius_w + self.resolution:
+                continue
+            # - no points generated into the line translation
+            cx, cy = self.world_to_map(rx, ry)
+            mx, my = self.world_to_map(hx, hy)
+            points = bresenham(cx, cy, mx, my)
+            if not points:
+                continue
+            
+            # -------------------------------------------------
+            # Updating obstacle map
+            # -------------------------------------------------
+            for x, y in points[:-1]:
+                # Only check bounds once
                 if not self.is_in_bounds((x, y)):
-                    break
+                    continue
 
-                self.obstacle_map[x, y] = 0
+                # Max distance check (squared)
+                dx, dy = x - rx, y - ry
+                if np.sqrt(dx**2 + dy**2) > (max_dist / self.resolution):
+                    continue
 
-            if max_dist is None or dist < max_dist:
-                if self.is_in_bounds((x1, y1)):
-                    self.obstacle_map[x1, y1] = 1
+                # Clip to avoid underflow
+                self.hit_count_map[x, y] = max(self.hit_count_map[x, y] - 1, 0)
 
+            # Final hit point
+            if self.is_in_bounds((mx, my)):
+                self.hit_count_map[mx, my] += 1
+
+        # Update obstacle map only once
+        self.obstacle_map = (self.hit_count_map >= self.confirm_threshold).astype(np.uint8)
+
+        if lidar_meshes is not None:
+            self.objects_identified = set(lidar_meshes)
+            print("Objects identified in the scene:", self.objects_identified)
+        
+        # updating sdf map
         self.compute_sdf()
-
-    def set_obstacle(self, pos_w):
-
-        ix, iy = self.world_to_map(*pos_w)
-        pos = (ix,iy)
-
-        if self.is_in_bounds(pos):
-            self.obstacle_map[ix, iy] = 1
             
     # -------------------------------------------------
     # CONTINUOUS SDF
@@ -149,54 +168,54 @@ class ContinuousInflationMap:
         self.grad_x, self.grad_y = np.gradient(self.sdf_map)
 
     def sdf(self, pos_w):
-        mx, my = self.world_to_map(pos_w[0], pos_w[1])
+        # --- 1. convert to continuous map coordinates ---
+        mx = pos_w[0] / self.resolution
+        my = pos_w[1] / self.resolution
 
-        x0 = int(math.floor(mx))
-        y0 = int(math.floor(my))
+        # --- 2. integer cell ---
+        x0 = int(np.floor(mx))
+        y0 = int(np.floor(my))
 
-        x1 = x0 + 1
-        y1 = y0 + 1
+        # --- 3. clamp neighbors ---
+        x1 = min(x0 + 1, self.sdf_map.shape[0] - 1)
+        y1 = min(y0 + 1, self.sdf_map.shape[1] - 1)
 
+        # --- 4. bounds check ---
         if not self.is_in_bounds((x0, y0)):
             return -self.robot_radius
 
-        if not self.is_in_bounds((x1, y1)):
-            return self.sdf_map[x0, y0]
-
+        # --- 5. fractional offset ---
         dx = mx - x0
         dy = my - y0
 
+        # --- 6. fetch values ---
         d00 = self.sdf_map[x0, y0]
         d10 = self.sdf_map[x1, y0]
         d01 = self.sdf_map[x0, y1]
         d11 = self.sdf_map[x1, y1]
 
+        # --- 7. bilinear interpolation ---
         d0 = d00 * (1 - dx) + d10 * dx
         d1 = d01 * (1 - dx) + d11 * dx
 
-        return d0 * (1 - dy) + d1 * dy
-
+        return (d0 * (1 - dy) + d1 * dy)
 
     def cost(self, pos_w):
         # sdf cost function
         d = self.sdf(pos_w)
 
-        if d <= self.robot_radius:
+        if d <= self.robot_radius_w:
             return self.max_cost
 
-        if d > self.inflation_radius:
+        if d > self.inflation_radius_w:
             return 0
 
-        return self.max_cost * math.exp(
-            -self.cost_scaling_factor * (d - self.robot_radius)
-        )
+        return self.max_cost / \
+         (1 + np.exp(self.cost_scaling_factor * (d - self.inflation_radius_w)))
 
     # -------------------------------------------------
     # UTILITIES
     # -------------------------------------------------
-
-    def distance(self, pos_w):
-        return self.sdf(pos_w)
     
     def compute_orientation(self, robot_pos_w, target_point_w):
         """Computes robot orientation given the map robot and target position"""
@@ -206,40 +225,45 @@ class ContinuousInflationMap:
         return angle
 
     def is_free_space(self, pos_w):
-        return self.sdf(pos_w) > self.robot_radius
+        return self.sdf(pos_w) > self.robot_radius_w
     
-    def is_visible(self, p1_w, p2_w, max_range_w):
-        # check distance limit
-        dist = compute_dist(p1_w, p2_w)
-        max_range = max_range_w * self.resolution
-        if dist > max_range:
+    def is_visible(self, eye, obj, max_range_w):
+        # --- 1. range check ---
+        dist_total = compute_dist(eye, obj)
+        if dist_total > max_range_w:
             return False
 
-        # direction vector
-        dx = p2_w[0] - p1_w[0]
-        dy = p2_w[1] - p1_w[1]
+        # --- 2. building vision line ---
+        x0, y0 = self.world_to_map(*eye)
+        x1, y1 = self.world_to_map(*obj)
+        vision_line = bresenham(x0, y0, x1, y1)
 
-        # sampling step (half cell works well)
-        step = self.resolution * 0.5
-        steps = max(1, int(dist / step))
-
-        for i in range(steps + 1):
-
-            t = i / steps
-
-            px = p1_w[0] + dx * t
-            py = p1_w[1] + dy * t
-
-            # out of map = not visible
-            mx, my = self.world_to_map(px, py)
-            if not self.is_in_bounds((mx, my)):
+        # --- 3. checking visibility ---
+        step = self.resolution
+        for x, y in vision_line:
+            # --- a. skipping points too close to the eye (to avoid self-collision) ---
+            if np.sqrt((x - x0)**2 + (y - y0)**2) < self.robot_radius:
+                continue
+            
+            # --- b. checking map bounds ---
+            if not self.is_in_bounds((x, y)):
                 return False
-
-            # obstacle check using SDF
-            if self.sdf((px, py)) <= self.robot_radius_w:
+            
+            # --- c. checking if it is an obstacle or if it is too close ---
+            if self.obstacle_map[x, y] >= 1:
+                return False
+            
+            xw, yw = self.map_to_world(x, y)
+            if self.sdf((xw, yw)) < step:
                 return False
 
         return True
+    
+    def is_task_visible(self,tname):
+        for objname in self.objects_identified:
+            if tname in objname:
+                return True
+        return False
 
     def gradient(self, pos_w):
         if self.grad_x is None or self.grad_y is None:
@@ -268,27 +292,20 @@ class ContinuousInflationMap:
         # -------------------------------------------------
         # Build COST MAP from SDF (vectorized)
         # -------------------------------------------------
-
         d = self.sdf_map
-
         viz_cost = np.zeros_like(d)
 
         # obstacle region
-        viz_cost[d <= self.robot_radius] = 255
+        viz_cost[d <= self.robot_radius_w] = self.max_cost
 
         # inflation region
-        mask = (d > self.robot_radius) & (d <= self.inflation_radius)
-        viz_cost[mask] = 255 * np.exp(
-            -self.cost_scaling_factor * (d[mask] - self.robot_radius)
-        )
+        mask = (d > self.robot_radius_w) & (d <= self.inflation_radius_w)
+        viz_cost[mask] = self.max_cost / (1 + np.exp(self.cost_scaling_factor * (d[mask] - self.inflation_radius_w)))
 
         # transpose for visualization
         viz_cost = viz_cost.T
         viz_obstacles = self.obstacle_map.T
-
-        viz_memory = None
-        if memory_map is not None:
-            viz_memory = memory_map.T
+        viz_memory = memory_map.T if memory_map is not None else None
 
         # -------------------------------------------------
         # Initialize figure
@@ -296,35 +313,36 @@ class ContinuousInflationMap:
 
         if not hasattr(self, "_fig") or self._fig is None:  
 
-            import matplotlib.pyplot as plt
-            import matplotlib.patches as ptc
-
             self._fig, self._ax = plt.subplots(figsize=(6, 6))
-
-            # costmap (inflation visualization)
-            self._im = self._ax.imshow(
-                viz_cost,
-                cmap='inferno',
-                origin='lower',
-                vmin=0,
-                vmax=255,
-                zorder=1
-            )
 
             # obstacle overlay (strong)
             self._obs_overlay = self._ax.imshow(
-                viz_obstacles,
+                np.zeros_like(viz_cost),
                 cmap='gray',
+                vmin=0, vmax=1,
                 origin='lower',
-                alpha=0.6,
+                alpha=1.0,
+                zorder=1
+            )
+
+            # costmap (inflation visualization)
+            self._im = self._ax.imshow(
+                np.zeros_like(viz_cost),
+                cmap='inferno',
+                origin='lower',
+                vmin=0,
+                vmax=self.max_cost,
+                alpha=0.5,
                 zorder=2
             )
+
 
             # memory overlay
             self._memory_overlay = self._ax.imshow(
                 np.zeros_like(viz_cost),
                 cmap='gray',
                 origin='lower',
+                vmin=0, vmax=1,
                 alpha=0.3,
                 zorder=3
             )
@@ -349,18 +367,19 @@ class ContinuousInflationMap:
         # -------------------------------------------------
         if self._im:
             self._im.set_data(viz_cost)
-        self._obs_overlay.set_data(viz_obstacles)
+
+        if self._obs_overlay:
+            self._obs_overlay.set_data(viz_obstacles)
 
         if viz_memory is not None:
-            self._memory_overlay.set_data((viz_memory > 0).astype(float))
+            visited_mask = (viz_memory > 0)
+            self._memory_overlay.set_data(visited_mask.astype(float))
 
         # -------------------------------------------------
         # Robot
         # -------------------------------------------------
 
         if robot:
-
-            import matplotlib.patches as ptc
 
             mx, my = self.world_to_map(robot['pos'][0], robot['pos'][1])
 
