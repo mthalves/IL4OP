@@ -125,7 +125,7 @@ class OnlinePlanning(ManagerTermBase):
             agent, problem_env = msg
             try:
                 action_sequence = self.planner.plan(agent, problem_env)
-                path = problem_env.translate_actions2path(agent, action_sequence)
+                path, action_sequence = problem_env.translate_actions2path(agent, action_sequence)
                 res_q.put((action_sequence, path))
             except Exception as e:
                 print("Planner worker error:", e)

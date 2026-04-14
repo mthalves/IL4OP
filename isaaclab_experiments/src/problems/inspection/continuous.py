@@ -1,6 +1,6 @@
 import copy
+import heapq
 import numpy as np
-import random as rd
 
 from isaaclab_experiments.src.mapping.utils import compute_dist
 from isaaclab_experiments.src.mapping.continuous import ContinuousInflationMap
@@ -87,6 +87,10 @@ class ContinuousInspectionProblemState:
         else:
             pos = next_state.agent_pos
 
+            # checking if it is a special navigation action
+            if str(action) in self.special_actions:
+                action = self.special_actions[str(action)]
+
             # updating actions list
             if str(action) not in self.actions_dict:
                 self.actions_dict[str(action)] = action
@@ -97,9 +101,12 @@ class ContinuousInspectionProblemState:
                 int(pos[0] + dx),
                 int(pos[1] + dy),
             )
-            # collision check via costmap
-            if self.map.cost(new_pos) < self.map.eta * self.map.max_cost:
+            # reachability via visibility + collision check via costmap
+            if self.map.is_visible(pos,new_pos, self.visibility_radius) \
+            and self.map.cost(new_pos) < self.map.eta * self.map.max_cost:
                 next_state.agent_pos = new_pos
+            else:
+                next_state.agent_pos = pos
 
         return next_state, reward, None, None
     
@@ -112,9 +119,22 @@ class ContinuousInspectionProblemState:
         dx = np.cos(angle)
         dy = np.sin(angle)
 
-        norm = np.hypot(dx, dy) + 1e-8
-        dx /= norm
-        dy /= norm
+        mx, my = self.map.world_to_map(px, py)
+        if self.map.grad_x is not None and self.map.grad_y is not None:
+            gx = self.map.grad_x[mx, my]
+            gy = self.map.grad_y[mx, my]
+
+            grad_norm = np.hypot(gx, gy) + 1e-8
+            gx /= grad_norm
+            gy /= grad_norm
+
+            alpha = 0.7  # strength of bias
+            dx = alpha * gx + (1 - alpha) * dx
+            dy = alpha * gy + (1 - alpha) * dy
+        else:
+            norm = np.hypot(dx, dy) + 1e-8
+            dx /= norm
+            dy /= norm
 
         step = self.map.resolution / 4.0
         dist = 0.0
@@ -250,7 +270,11 @@ class ContinuousInspectionProblem:
     ]
 
     special_actions = {
-        "X": (0, 0),                # inspection
+        "X": ( 0, 0),                   # inspection
+        "N": ( 0, navigation_radius),   # north
+        "S": ( 0,-navigation_radius),   # south
+        "W": (-navigation_radius, 0),   # west
+        "E": ( navigation_radius, 0),   # east
     }
 
     def __init__(
@@ -296,12 +320,13 @@ class ContinuousInspectionProblem:
         self.max_inspection = max_inspection
         self.max_inspection_distance = max_inspection_distance
 
-        self.sample_index = len(self.tasks) * 10
-
         self.last_target_point = None
         self.last_target_dir = None
         self.last_vis_pos = None
 
+        # updating unknown positions
+        self.unknown_positions = None
+        self.unknown_dists = None
 
     # -------------------------------------------------
     # TERMINATION
@@ -373,6 +398,10 @@ class ContinuousInspectionProblem:
                     self.tasks_found[tname] = tpos
                     self.inspection_counter[tname] = 0
 
+        # updating unknown positions
+        unknown_spaces = self.get_unknown_spaces(agent_pos_w)
+        self.unknown_positions = [space[0:2] for space in unknown_spaces]
+        self.unknown_dists = [space[2] for space in unknown_spaces]
 
     # -------------------------------------------------
     # STATE
@@ -397,29 +426,105 @@ class ContinuousInspectionProblem:
     # UNKNOWN SPACE SAMPLING
     # -------------------------------------------------
 
-    def get_unknown_positions(self):
+    def compute_distance_map(self, start_idx):
+        width, height = self.map.map_size
+        dist_map = np.full((width, height), np.inf)
+
+        pq = []
+        heapq.heappush(pq, (0.0, start_idx))
+        dist_map[start_idx] = 0.0
+
+        # 8 connectivity
+        neighbors = [(-1,0),(1,0),(0,-1),(0,1)]
+
+        while pq:
+            dist, (x, y) = heapq.heappop(pq)
+
+            if dist > dist_map[x, y]:
+                continue
+
+            for dx, dy in neighbors:
+                nx, ny = x + dx, y + dy
+
+                if not (0 <= nx < width and 0 <= ny < height):
+                    continue
+
+                # Convert to world to evaluate cost
+                pos_w = self.map.map_to_world(nx + 0.5, ny + 0.5)
+                cost = self.map.cost(pos_w)
+
+                # Skip obstacles
+                if cost >= self.map.eta * self.map.max_cost:
+                    continue
+
+                step_cost = 1.0 + cost  # you can tune this
+                new_dist = dist + step_cost
+
+                if new_dist < dist_map[nx, ny]:
+                    dist_map[nx, ny] = new_dist
+                    heapq.heappush(pq, (new_dist, (nx, ny)))
+
+        return dist_map
+
+    def get_unknown_spaces(self, robot_pos_world):
         free_spaces = []
+
+        # Convert robot position to map index
+        start_idx = self.map.world_to_map(*robot_pos_world)
+
+        dist_map = self.compute_distance_map(start_idx)
+
         for x in range(self.map.map_size[0]):
             for y in range(self.map.map_size[1]):
                 if self.memory_map[x, y] == 0:
+                    if np.isinf(dist_map[x, y]):
+                        continue  # unreachable
+
                     pos_w = self.map.map_to_world(x + 0.5, y + 0.5)
+
                     if self.map.cost(pos_w) < self.map.eta * self.map.max_cost:
-                        free_spaces.append(pos_w)
-        return free_spaces
+                        distance = dist_map[x, y]
+
+                        free_spaces.append(np.array([\
+                            np.round(pos_w[0], 1), np.round(pos_w[1], 1), float(distance)\
+                        ]))
+
+        return np.array(free_spaces)
 
 
     def sample_state(self, state):
-        free_spaces = self.get_unknown_positions()
         sampled_state = self.get_current_state(state.agent_pos)
 
-        while len(sampled_state.tasks_found) != len(self.tasks) and free_spaces:
-            tpos = free_spaces.pop(rd.randrange(len(free_spaces)))
-            task_key = "T" + str(self.sample_index)
+        if not self.unknown_positions or not self.unknown_dists:
+            return sampled_state
+        
+        free_spaces = copy.deepcopy(self.unknown_positions)
+        dists = np.array(copy.deepcopy(self.unknown_dists))
+
+        # --- convert to weights (closer = higher prob) ---
+        dists = np.abs(dists - self.visibility_radius)
+        alpha = 1.0  # tuning parameter
+        weights = np.exp(-alpha * dists)
+
+        # avoid degenerate case
+        weights += 1e-8
+        probs = weights / np.sum(weights)
+
+        # --- sampling loop ---
+        indices = list(range(len(free_spaces)))
+        while len(sampled_state.tasks_found) != len(self.tasks) and len(indices) > 0:
+
+            # sample index using weighted probability
+            idx = np.random.choice(indices, p=probs[indices] / np.sum(probs[indices]))
+
+            tpos = free_spaces[idx]
+            task_key = "T(%2.2f,%2.2f)" % (tpos[0], tpos[1])
 
             sampled_state.tasks_found[task_key] = tpos
             sampled_state.inspection_counter[task_key] = 0
 
-            self.sample_index += 1
+            # remove selected index
+            indices.remove(idx)
 
         return sampled_state
 
@@ -428,25 +533,120 @@ class ContinuousInspectionProblem:
     # NAVIGATION
     # -------------------------------------------------
 
+    def smooth_segment(self, path_segment):
+        if len(path_segment) <= 2:
+            return path_segment
+
+        smoothed = [path_segment[0]]
+        i = 0
+
+        while i < len(path_segment) - 1:
+            j = len(path_segment) - 1
+
+            # Try to connect i → j directly
+            while j > i + 1:
+                if self.map.is_visible(smoothed[-1], path_segment[j], self.visibility_radius):
+                    break
+                j -= 1
+
+            smoothed.append(path_segment[j])
+            i = j
+
+        return smoothed
+
     def translate_actions2path(self, agent, action_sequence):
-        translated_path = []
-        pos = agent["pos"]
-            
+        current_pos = np.array(agent["pos"])
+
+        full_path = []
+        expanded_actions = []
+
         for a in action_sequence:
+            # --- Decode action ---
             if str(a) in self.special_actions:
                 dx, dy = self.special_actions[str(a)]
             else:
                 dx, dy = a
-            new_pos = (pos[0] + dx, pos[1] + dy)
-            mnew_pos = self.map.world_to_map(*new_pos)
 
-            if self.map.sdf(new_pos) > self.map.robot_radius_w and \
-            self.map.is_in_bounds(mnew_pos):
-                translated_path.append(new_pos)
+            local_target = current_pos + np.array([dx, dy])
+            if not self.map.is_visible(
+             current_pos, local_target, self.visibility_radius):
+                return [tuple(current_pos)], action_sequence[-1]
+
+            start_idx = self.map.world_to_map(*current_pos)
+            goal_idx  = self.map.world_to_map(*local_target)
+
+            # --- A* (same as before) ---
+            open_set = []
+            heapq.heappush(open_set, (0.0, start_idx))
+
+            came_from = {}
+            g_score = {start_idx: 0.0}
+
+            neighbors = [(-1,0),(1,0),(0,-1),(0,1),
+                        (-1,-1),(1,1),(-1,1),(1,-1)]
+
+            def heuristic(a, b):
+                return np.linalg.norm(np.array(a) - np.array(b))
+
+            found = False
+            while open_set:
+                _, current = heapq.heappop(open_set)
+
+                if current == goal_idx:
+                    found = True
+                    break
+
+                for dx_n, dy_n in neighbors:
+                    nx, ny = current[0] + dx_n, current[1] + dy_n
+                    neighbor = (nx, ny)
+
+                    if not self.map.is_in_bounds(neighbor):
+                        continue
+
+                    pos_w = self.map.map_to_world(nx + 0.5, ny + 0.5)
+
+                    sdf = self.map.sdf(pos_w)
+                    if sdf <= self.map.robot_radius_w:
+                        continue
+
+                    obstacle_cost = 1.0 / (sdf + 1e-3)
+                    step_cost = np.linalg.norm([dx_n, dy_n]) * self.map.resolution
+
+                    tentative_g = g_score[current] + step_cost + obstacle_cost
+
+                    if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                        g_score[neighbor] = float(tentative_g)
+                        f_score = tentative_g + heuristic(neighbor, goal_idx)
+
+                        heapq.heappush(open_set, (f_score, neighbor))
+                        came_from[neighbor] = current
+
+            # --- Reconstruct local path ---
+            local_path = []
+            current = goal_idx
+
+            if not found or current not in came_from:
+                local_path = [tuple(current_pos)]
             else:
-                translated_path.append(pos)
+                while current != start_idx:
+                    pos_w = self.map.map_to_world(current[0] + 0.5, current[1] + 0.5)
+                    local_path.append(pos_w)
+                    current = came_from[current]
 
-        return translated_path
+                local_path.reverse()
+
+            # --- 🔥 NEW: Smooth THIS segment ---
+            local_path = self.smooth_segment(local_path)
+
+            # --- Append with action repetition ---
+            for p in local_path:
+                full_path.append(p)
+                expanded_actions.append(a)
+
+            if len(local_path) > 0:
+                current_pos = np.array(local_path[-1])
+
+        return full_path, expanded_actions
 
 
     # -------------------------------------------------
@@ -471,7 +671,7 @@ class ContinuousInspectionProblem:
         agent_pos = agent["pos"]
 
         # if no path is defined
-        if (not path):
+        if (not path) or (not action_sequence):
             if (self.last_target_dir is None) or (self.last_target_point is None):
                 target_point = agent_pos
                 target_dir = agent["heading"]
@@ -516,8 +716,8 @@ class ContinuousInspectionProblem:
             else:
                 # checking if the robot is close to the current target position 
                 # (reached the target position)
-                current_target_pos = path[0]
-                if compute_dist(agent_pos, current_target_pos) < self.map.robot_radius_w:
+                current_pos = path[0]
+                if path and compute_dist(agent_pos, current_pos) < self.map.robot_radius_w:
                     pop_step()
                 
                 # if there is still further points to reach, define the target point

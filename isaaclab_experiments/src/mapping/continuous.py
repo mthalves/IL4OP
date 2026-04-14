@@ -2,6 +2,7 @@ import math
 import matplotlib.pyplot as plt
 import matplotlib.patches as ptc
 import numpy as np
+import torch
 
 from isaaclab_experiments.src.mapping.utils import bresenham, compute_dist, distance_transform_edt
 
@@ -96,50 +97,63 @@ class ContinuousInflationMap:
 
     def update_with_lidar(self, robot_pos_w, lidar_readings, lidar_meshes=None, max_dist=None):
         rx, ry = robot_pos_w
-        max_dist = max_dist if max_dist is not None \
-         else 0.5 * math.sqrt(self.map_size_w[0]**2 + self.map_size_w[1]**2)
-        for hx, hy, hz in lidar_readings.cpu().numpy():
-            # calculating support variables (direction and distance)
-            dx = hx - rx
-            dy = hy - ry
-            dist = math.sqrt(dx * dx + dy * dy)
+        max_dist_sq = max_dist**2 if max_dist is not None \
+         else 0.5 * (self.map_size_w[0]**2 + self.map_size_w[1]**2)
+        
 
-            # -------------------------------------------------
-            # Skip invalid readings
-            # -------------------------------------------------
-            # - finite reading
-            if not np.isfinite(hx) or not np.isfinite(hy):
-                continue
-            # - reliable height reading
-            if not (self.z_min <= hz <= self.z_max):
-                continue
-            # - minimum range condition (avoiding using hits on the robot)
-            if dist <= self.robot_radius_w + self.resolution:
-                continue
-            # - no points generated into the line translation
-            cx, cy = self.world_to_map(rx, ry)
-            mx, my = self.world_to_map(hx, hy)
+        # --- separating hits per axis ---
+        hits = lidar_readings  # (N, 3)
+        hx = hits[:, 0]
+        hy = hits[:, 1]
+        hz = hits[:, 2]
+
+
+        # --- vectorized filtering ---
+        dx = hx - rx
+        dy = hy - ry
+        dist_sq = dx**2 + dy**2
+
+        valid_mask = (
+            torch.isfinite(hx) & torch.isfinite(hy) &                   # finite check
+            (hz >= self.z_min) & (hz <= self.z_max) &                   # valid height
+            (dist_sq > (self.robot_radius_w + self.resolution) ** 2)    # in a valid sight
+        )
+
+        hx = hx[valid_mask]
+        hy = hy[valid_mask]
+        dist_sq = dist_sq[valid_mask]
+
+        if hx.numel() == 0:
+            return
+
+        # --- convert robot position ---
+        cx, cy = self.world_to_map(rx, ry)
+
+        # --- process only valid rays ---
+        for i in range(hx.shape[0]):
+            
+            mx, my = self.world_to_map(float(hx[i]), float(hy[i]))
+
             points = bresenham(cx, cy, mx, my)
             if not points:
                 continue
-            
-            # -------------------------------------------------
-            # Updating obstacle map
-            # -------------------------------------------------
+
+            # --- free space update ---
             for x, y in points[:-1]:
-                # Only check bounds once
+
                 if not self.is_in_bounds((x, y)):
                     continue
 
-                # Max distance check (squared)
-                dx, dy = x - rx, y - ry
-                if np.sqrt(dx**2 + dy**2) > (max_dist / self.resolution):
+                dx_map = (x - cx)
+                dy_map = (y - cy)
+
+                if (dx_map * dx_map + dy_map * dy_map) > (max_dist_sq / (self.resolution ** 2)):
                     continue
 
-                # Clip to avoid underflow
-                self.hit_count_map[x, y] = max(self.hit_count_map[x, y] - 1, 0)
+                if self.hit_count_map[x, y] > 0:
+                    self.hit_count_map[x, y] -= 1
 
-            # Final hit point
+            # --- occupied cell ---
             if self.is_in_bounds((mx, my)):
                 self.hit_count_map[mx, my] += 1
 
@@ -240,7 +254,7 @@ class ContinuousInflationMap:
 
         # --- 3. checking visibility ---
         step = self.resolution
-        for x, y in vision_line:
+        for x, y in vision_line[:-1]:  # excluding the last point (the object itself)
             # --- a. skipping points too close to the eye (to avoid self-collision) ---
             if np.sqrt((x - x0)**2 + (y - y0)**2) < self.robot_radius:
                 continue
@@ -415,6 +429,26 @@ class ContinuousInflationMap:
             else:
                 self._robot_patch.center = (mx, my)
 
+
+            # -------------------------------------------------
+            # Path
+            # -------------------------------------------------
+            if path:
+                transl_path = [(mx,my)]
+                for p in path:
+                    transl_path.append(
+                        (
+                            int(math.floor(p[0] / self.resolution)),
+                            int(math.floor(p[1] / self.resolution))
+                        )
+                    )
+
+                px, py = zip(*transl_path)
+                self._path_line.set_data(px, py)
+
+            else:
+                self._path_line.set_data([], [])
+
         # -------------------------------------------------
         # Tasks
         # -------------------------------------------------
@@ -434,26 +468,6 @@ class ContinuousInflationMap:
 
         else:
             self._task_markers.set_data([], [])
-
-        # -------------------------------------------------
-        # Path
-        # -------------------------------------------------
-
-        if path:
-
-            transl_path = [
-                (
-                    int(math.floor(p[0] / self.resolution)),
-                    int(math.floor(p[1] / self.resolution))
-                )
-                for p in path
-            ]
-
-            px, py = zip(*transl_path)
-            self._path_line.set_data(px, py)
-
-        else:
-            self._path_line.set_data([], [])
 
         # -------------------------------------------------
         # Redraw

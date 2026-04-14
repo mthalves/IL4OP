@@ -164,8 +164,10 @@ class CANode(CNode):
 
     def add_child(self, observation):
         state = self.state.copy()
-        child = CONode(observation,state,self.depth+1,self)
-        self.children.append(child)
+        child = self.get_child(observation)
+        if child is None:
+            child = CONode(observation,state,self.depth+1,self)
+            self.children.append(child)
         return child
     
     def get_child(self, observation):
@@ -218,15 +220,34 @@ class CONode(CNode):
         return ucb_select_action(self,c=c,mode=mode)
         
     def add_child(self,state,action):
-        child = CANode(action,state,self.depth+1,self)
-        self.children.append(child)
+        child = self.get_child(action)
+        if child is None:
+            child = CANode(action,state,self.depth+1,self)
+            self.children.append(child)
+        child.state = state.copy()
         return child
 
     def get_child(self,action):
         for child in self.children:
-            if child.action == action:
+            if str(child.action) == str(action):
                 return child
         return None
+    
+    def show_qtable(self):
+        print('#Actions %d - Children %d' % (len(self.actions), len(self.children)))
+        print('%15s %8s %8s %8s %8s' % ('Action','Q-Value','SumValue','Trials','#Obs'))
+        action_dict = {}
+        for a in self.actions:
+            action_dict[str(a)] = [self.qtable[str(a)]['qvalue'],self.qtable[str(a)]['trials']]
+        action_dict = sorted(action_dict,key=lambda x:(action_dict[x][0],action_dict[x][1]), reverse=True)
+        
+        for a in action_dict:
+            child = self.get_child(a)
+            print('%15s %8.4f %8.4f %8d %8d' % (a,self.qtable[str(a)]['qvalue'],\
+                                        self.qtable[str(a)]['sumvalue'],self.qtable[str(a)]['trials'], len(child.children)))
+        print('-----------------')
+        print('%8s %8.4f %8s %8d' % ('Value',self.value,'Visits',self.visits) )
+        print('-----------------')
     
 def find_new_CPO_root(
  current_state, previous_action, current_observation, previous_root

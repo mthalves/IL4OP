@@ -181,14 +181,14 @@ class ContinuousEventCfg:
         },
     )
 
-    obstacle_avoidance = EventTerm(
-        func=avoid_colision,
-        mode="interval",
-        interval_range_s=(0.3,0.3),
-        params={
-            "command_name": 'pose_commands',
-            "robot_cfg": SceneEntityCfg("robot"),
-            "lidar_cfg": SceneEntityCfg("lidar_sensor"),
-            "safe_distance": 0.5,
-        }
-    )
+    # obstacle_avoidance = EventTerm(
+    #     func=avoid_colision,
+    #     mode="interval",
+    #     interval_range_s=(0.3,0.3),
+    #     params={
+    #         "command_name": 'pose_commands',
+    #         "robot_cfg": SceneEntityCfg("robot"),
+    #         "lidar_cfg": SceneEntityCfg("lidar_sensor"),
+    #         "safe_distance": 0.7,
+    #     }
+    # )
