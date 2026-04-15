@@ -17,16 +17,18 @@ class POMCPDPW(object):
         self.particle_revigoration  = kwargs.get('particle_revigoration',True) # enable particle revigoration (silver2010pomcp)
         self.k                      = kwargs.get('k', 100) # particle filter size
 
+        self.c = kwargs.get('c', 50) # exploration constant for action progressive widening
+
         ###
         # Progressive Widening parameters
         ###
         # - action widening
-        self.ka = kwargs.get('ka', 0.5) 
-        self.alpha_a = kwargs.get('alpha_a', 0.5)
+        self.ka = kwargs.get('ka', 15.0) 
+        self.alpha_a = kwargs.get('alpha_a', 0.03)
 
         # - state/observation widening
-        self.ko = kwargs.get('ko', 0.5)        
-        self.alpha_o = kwargs.get('alpha_o', 0.5)
+        self.ko = kwargs.get('ko', 4.0)        
+        self.alpha_o = kwargs.get('alpha_o', 0.01)
         
     def simulate_action(self, node, action):
         # 1. Acting
@@ -79,7 +81,7 @@ class POMCPDPW(object):
 
         # 2. Selecting action and simulating it
         action = node.action_prog_widen(mode='max',
-                        coef={'ka':self.ka,'alpha_a':self.alpha_a, 'c':0.5}) 
+                    coef={'ka':self.ka,'alpha_a':self.alpha_a, 'c':self.c}) 
         (action_node, observation, reward) = self.simulate_action(node, action)
 
         # - checking if this action is already tried
@@ -93,7 +95,7 @@ class POMCPDPW(object):
         # 3. If the observation widenning criteria is met, do it
         if len(action_node.children) <= self.ko*action_node.visits**self.alpha_o:
             # - adding the action child on the tree
-            if action_node.action not in [c.action for c in node.children]:
+            if str(action_node.action) not in [str(c.action) for c in node.children]:
                 node.children.append(action_node)
             
             # - checking if the observation is in the tree
@@ -112,7 +114,8 @@ class POMCPDPW(object):
             
             # - expanding the tree
             if observation_node.visits == 0:
-                future_reward = self.rollout(observation_node, problem)
+                rollout_node = self.get_rollout_node(observation_node)
+                future_reward = self.rollout(rollout_node, problem)
                 observation_node.visits += 1
             else:
                 future_reward = self.simulate(observation_node, problem)
@@ -122,9 +125,9 @@ class POMCPDPW(object):
             observation_node = action_node.sample_child()
             if observation_node is None:
                 observation_node = action_node.add_child(observation)
+                observation_node.particle_filter.append(observation_node.state)
 
-            if observation_node.particle_filter is not None and \
-               len(observation_node.particle_filter) > 0:
+            if len(observation_node.particle_filter) > 0:
                 observation_node.state = random.sample(
                     observation_node.particle_filter,1)[0]
 
@@ -138,7 +141,7 @@ class POMCPDPW(object):
         return R
 
     def search(self, root, problem):
-        # 1. Performing the Monte-Carlo Tree Search
+        # 1. Performing the POMCP-DPW Search
         it = 0
         while it < self.max_it:
             

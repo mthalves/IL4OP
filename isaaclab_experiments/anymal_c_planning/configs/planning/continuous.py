@@ -128,7 +128,10 @@ class OnlinePlanning(ManagerTermBase):
                 path, action_sequence = problem_env.translate_actions2path(agent, action_sequence)
                 res_q.put((action_sequence, path))
             except Exception as e:
+                print("-" * 30)
                 print("Planner worker error:", e)
+                traceback.print_exc()
+                print("-" * 30)
 
     def shutdown(self):
         print("Shutting down planner process...")

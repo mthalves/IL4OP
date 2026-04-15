@@ -17,16 +17,18 @@ class POMCPOW(object):
         self.particle_revigoration  = kwargs.get('particle_revigoration',True) # enable particle revigoration (silver2010pomcp)
         self.k                      = kwargs.get('k', 100) # particle filter size
 
+        self.c = kwargs.get('c', 50) # exploration constant for action progressive widening
+
         ###
         # Progressive Widening parameters
         ###
         # - action widening
-        self.ka = kwargs.get('ka', 0.5) 
-        self.alpha_a = kwargs.get('alpha_a', 0.5)
+        self.ka = kwargs.get('ka', 15.0) 
+        self.alpha_a = kwargs.get('alpha_a', 0.03)
 
         # - state/observation widening
-        self.ko = kwargs.get('ko', 0.5)        
-        self.alpha_o = kwargs.get('alpha_o', 0.5)
+        self.ko = kwargs.get('ko', 4.0)        
+        self.alpha_o = kwargs.get('alpha_o', 0.01)
 
         # - access to the observation distribution function
         self.estimate_Z = True
@@ -82,7 +84,7 @@ class POMCPOW(object):
 
         # 2. Selecting action and simulating it
         action = node.action_prog_widen(mode='max',
-                        coef={'ka':self.ka,'alpha_a':self.alpha_a, 'c':0.5}) 
+                coef={'ka':self.ka,'alpha_a':self.alpha_a, 'c':self.c}) 
         (action_node, observation, reward) = self.simulate_action(node, action)
 
         # - adding the action child on the tree
@@ -156,7 +158,7 @@ class POMCPOW(object):
         return R
 
     def search(self, root, problem):
-        # 1. Performing the Monte-Carlo Tree Search
+        # 1. Performing the POMCPOW Search
         it = 0
         while it < self.max_it:
             

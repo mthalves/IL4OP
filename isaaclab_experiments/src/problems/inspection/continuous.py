@@ -570,7 +570,7 @@ class ContinuousInspectionProblem:
             local_target = current_pos + np.array([dx, dy])
             if not self.map.is_visible(
              current_pos, local_target, self.visibility_radius):
-                return [tuple(current_pos)], action_sequence[-1]
+                return [tuple(current_pos)], [action_sequence[0]]
 
             start_idx = self.map.world_to_map(*current_pos)
             goal_idx  = self.map.world_to_map(*local_target)
