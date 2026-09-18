@@ -1,6 +1,7 @@
 import math
 import heapq
-import numpy as np
+
+NAME = "A*"
 
 class AStarPlanner:
     def __init__(self, map_size):

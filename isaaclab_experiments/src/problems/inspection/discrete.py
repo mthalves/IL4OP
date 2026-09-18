@@ -6,6 +6,8 @@ import random as rd
 from isaaclab_experiments.src.mapping.discrete import DiscreteInflationMap
 from isaaclab_experiments.src.mapping.utils import compute_dist
 
+NAME = "Discrete Inspection Problem"
+
 class DiscreteInspectionProblemState:
 
     def __init__(self, 

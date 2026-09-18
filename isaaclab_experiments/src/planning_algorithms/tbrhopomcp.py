@@ -1,30 +1,28 @@
 from isaaclab_experiments.src.planning_algorithms.node import RhoANode, RhoONode
 from isaaclab_experiments.src.planning_algorithms.node import particle_revigoration
 
-import numpy as np
 import random
 import time
 
+NAME = "TB ρ-POMCP"
+
 class TBRhoPOMCP(object):
 
-    def __init__(self,max_depth,max_it,kwargs):
+    def __init__(self,kwargs):
         ###
         # Traditional Monte-Carlo Tree Search parameters
         ###
         self.root = None
         self.episode = 0
-        self.max_depth = max_depth
-        self.max_it = max_it
+        self.max_depth              = kwargs.get('max_depth', 20)
+        self.max_it                 = kwargs.get('max_it', 1000)
         
         self.discount_factor        = kwargs.get('discount_factor',0.95) # discount factor (historical weight)
         self.particle_revigoration  = kwargs.get('particle_revigoration',True) # enable particle revigoration (silver2010pomcp)
         self.k                      = kwargs.get('k', 100) # particle filter size
         
-        smallbag_size = kwargs.get('smallbag_size') # smallbag size
-        self.smallbag_size = smallbag_size if smallbag_size is not None else 10
-        
-        time_budget = kwargs.get('time_budget') # time budget in seconds
-        self.time_budget = time_budget if time_budget is not None else 2.0
+        self.smallbag_size          = kwargs.get('smallbag_size', 10) # smallbag size
+        self.time_budget            = kwargs.get('time_budget', 2.0) # time budget in seconds
         self.start_time_budget = time.time()
         
 

@@ -58,8 +58,8 @@ class IONode(ONode):
             else:
                 self.observation_distribution[key] = 1
     
-    def get_alpha(self):
-        adjust_value = 0.2
+    def get_alpha(self, q):
+        adjust_value = q
         if self.visits == 0:
             return 1 - adjust_value
 

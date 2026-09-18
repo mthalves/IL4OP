@@ -3,15 +3,17 @@ from isaaclab_experiments.src.planning_algorithms.node import find_new_CPO_root,
 
 import random
 
+NAME = "POMCP-DPW"
+
 class POMCPDPW(object):
 
-    def __init__(self,max_depth,max_it,kwargs):
+    def __init__(self,kwargs):
         ###
         # Traditional Monte-Carlo Tree Search parameters
         ###
         self.root = None
-        self.max_depth = max_depth
-        self.max_it = max_it
+        self.max_depth              = kwargs.get('max_depth', 20)
+        self.max_it                 = kwargs.get('max_it', 1000)
         
         self.discount_factor        = kwargs.get('discount_factor',0.95) # discount factor (historical weight)
         self.particle_revigoration  = kwargs.get('particle_revigoration',True) # enable particle revigoration (silver2010pomcp)
@@ -23,12 +25,12 @@ class POMCPDPW(object):
         # Progressive Widening parameters
         ###
         # - action widening
-        self.ka = kwargs.get('ka', 15.0) 
-        self.alpha_a = kwargs.get('alpha_a', 0.03)
+        self.ka                     = kwargs.get('ka', 15.0) 
+        self.alpha_a                = kwargs.get('alpha_a', 0.03)
 
         # - state/observation widening
-        self.ko = kwargs.get('ko', 4.0)        
-        self.alpha_o = kwargs.get('alpha_o', 0.01)
+        self.ko                     = kwargs.get('ko', 4.0)        
+        self.alpha_o                = kwargs.get('alpha_o', 0.01)
         
     def simulate_action(self, node, action):
         # 1. Acting

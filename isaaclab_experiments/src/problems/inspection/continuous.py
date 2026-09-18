@@ -5,6 +5,8 @@ import numpy as np
 from isaaclab_experiments.src.mapping.utils import compute_dist
 from isaaclab_experiments.src.mapping.continuous import ContinuousInflationMap
 
+NAME = "Continuous Inspection Problem"
+
 class ContinuousInspectionProblemState:
 
     def __init__(self,

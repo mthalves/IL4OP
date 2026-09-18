@@ -1,16 +1,18 @@
 from isaaclab_experiments.src.planning_algorithms.node import \
     DespotANode, DespotONode, find_new_despot_root
 
+NAME = "DESPOT"
+
 class DESPOT:
 
-    def __init__(self, max_depth, max_it, kwargs):
+    def __init__(self, kwargs):
         self.root = None
-        self.max_depth = max_depth
-        self.max_it = max_it
+        self.max_depth          = kwargs.get("max_depth", 20)
+        self.max_it             = kwargs.get("max_it", 1000)
 
-        self.discount_factor = kwargs.get("discount_factor", 0.95)
-        self.num_scenarios   = kwargs.get("num_scenarios", 100)
-        self.lambda_reg      = kwargs.get("lambda_reg", 0.005)
+        self.discount_factor    = kwargs.get("discount_factor", 0.95)
+        self.num_scenarios      = kwargs.get("num_scenarios", 100)
+        self.lambda_reg         = kwargs.get("lambda_reg", 0.005)
 
     # ------------------------------------------------------------------
     # Utilities

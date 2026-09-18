@@ -3,20 +3,23 @@ from isaaclab_experiments.src.planning_algorithms.node import IANode, IONode, \
 
 import random
 
+NAME = "IB-POMCP"
+
 class IBPOMCP(object):
 
-    def __init__(self,max_depth,max_it,kwargs):
+    def __init__(self,kwargs):
         ###
-        # Traditional Monte-Carlo Tree Search parameters
+        # Tree Search parameters
         ###
         self.root = None
-        self.max_depth = max_depth
-        self.max_it = max_it
+        self.max_depth              = kwargs.get('max_depth', 20)
+        self.max_it                 = kwargs.get('max_it', 1000)
         
         self.alpha                  = kwargs.get('alpha',0.5) # information weight (alves2023information)
         self.discount_factor        = kwargs.get('discount_factor',0.95) # discount factor (historical weight)
         self.particle_revigoration  = kwargs.get('particle_revigoration',True) # enable particle revigoration (silver2010pomcp)
         self.k                      = kwargs.get('k', 100) # particle filter size
+        self.q                      = kwargs.get('q', 0.2) # scale factor for alpha
 
         self.state_distribution = {}
         self.state_entropy_hist = []
@@ -145,11 +148,11 @@ class IBPOMCP(object):
             root.state = beliefState
 
             # b. simulating
-            self.alpha = root.get_alpha()
+            self.alpha = root.get_alpha(self.q)
             self.simulate(root, problem)
             it += 1
 
-        self.alpha = root.get_alpha()
+        self.alpha = root.get_alpha(self.q)
         return root.get_best_action(self.alpha)
 
     def plan(self, agent, problem):

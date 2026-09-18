@@ -3,15 +3,17 @@ from isaaclab_experiments.src.planning_algorithms.node import find_new_PO_root, 
 
 import random
 
+NAME = "POMCP"
+
 class POMCP(object):
 
-    def __init__(self,max_depth,max_it,kwargs):
+    def __init__(self,kwargs):
         ###
         # Traditional Monte-Carlo Tree Search parameters
         ###
         self.root = None
-        self.max_depth = max_depth
-        self.max_it = max_it
+        self.max_depth              = kwargs.get('max_depth', 20)
+        self.max_it                 = kwargs.get('max_it', 1000)
         
         self.c                      = kwargs.get('exploration_weight',0.5) # exploration_weight
         self.discount_factor        = kwargs.get('discount_factor',0.95) # discount factor (historical weight)
@@ -138,24 +140,17 @@ class POMCP(object):
 
     def plan(self, agent, problem):
         # 1. Getting the current state and previous action-observation pair
-        print('P> Planning for agent:', agent['name'], '\n- max depth:', self.max_depth, \
-              'P> max it:', self.max_it, 'k:', self.k)
         state = problem.get_current_state(agent['pos'])
-        print('P> Agent pos:', state.agent_pos,'- Tasks found:',state.tasks_found)
         observation = state.get_observation()
-        print('P> Current observation:', observation)
         previous_action = None if len(agent['action_history']) == 0 \
                             else agent['action_history'][-1]
 
         # 2. Defining the root of our search tree
         # via initialising the tree
         if self.root is None:
-            print('<!> No previous root found, creating a new one')
-            Px = 0
             self.root = ONode(observation=observation,state=state,depth=0,parent=None)
         # or advancing within the existent tree
         else:
-            print('<!> Advancing within the existent tree')
             self.root = find_new_PO_root(
                 state, previous_action, observation, self.root
             )
@@ -165,7 +160,6 @@ class POMCP(object):
             particle_revigoration(state, problem, self.root, self.k)
 
         # 4. Searching for the best action within the tree
-        print('P> Starting the search for the best action')
         best_action = self.search(self.root, problem)
         self.root.show_qtable()
         return [best_action]

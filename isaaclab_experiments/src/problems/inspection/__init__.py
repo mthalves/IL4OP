@@ -1,2 +1,4 @@
+NAME = "Inspection Problem"
+
 from isaaclab_experiments.src.problems.inspection.discrete import DiscreteInspectionProblem   # noqa: F401
 from isaaclab_experiments.src.problems.inspection.continuous import ContinuousInspectionProblem   # noqa: F401

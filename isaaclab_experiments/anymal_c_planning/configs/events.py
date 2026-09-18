@@ -12,7 +12,7 @@ import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
 from isaaclab_experiments.anymal_c_planning.configs.planning.discrete import OnlinePlanning as DiscretePlanning
 from isaaclab_experiments.anymal_c_planning.configs.planning.continuous import OnlinePlanning as ContinuousPlanning
-from isaaclab_experiments.anymal_c_planning.agents.planning_cfg import DISCRETE_AGENT, CONTINUOUS_AGENT
+from isaaclab_experiments.anymal_c_planning.agents.planning_cfg import AGENT
 
 def reset_command( 
  env: ManagerBasedEnv, env_ids: torch.Tensor | None,
@@ -124,7 +124,7 @@ class DiscreteEventCfg(BaseEventCfg):
         mode="interval",
         interval_range_s=(1.,1.),
         params={
-            "planning_method":DISCRETE_AGENT,
+            "planning_method":AGENT,
             "problem": {
                 "name":"inspection.discrete",
                 "args": {
@@ -158,7 +158,7 @@ class ContinuousEventCfg:
         mode="interval",
         interval_range_s=(1.,1.),
         params={
-            "planning_method":CONTINUOUS_AGENT,
+            "planning_method":AGENT,
             "problem": {
                 "name":"inspection.continuous",
                 "args": {
