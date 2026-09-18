@@ -76,9 +76,7 @@ class IBPOMCP(object):
             node.visits += 1
 
         if self.is_terminal(node) or self.is_leaf(node):
-            obs = node.observation
-            observation_found = [obs]
-            return 0, observation_found
+            return 0, []
 
         # 2. Checking child nodes
         if node.children == []:
@@ -87,10 +85,7 @@ class IBPOMCP(object):
                 (next_node, reward) = self.simulate_action(node, action)
                 node.children.append(next_node)
             rollout_node = self.get_rollout_node(node)
-
-            obs = node.observation
-            observation_found = [obs]
-            return self.rollout(rollout_node, problem), observation_found
+            return self.rollout(rollout_node, problem), []
         
         # 3. Selecting the best action
         action = node.select_action(coef=self.alpha,mode='iucb') 
@@ -128,8 +123,8 @@ class IBPOMCP(object):
         R = reward + (self.discount_factor * future_reward)
 
         # - node update
-        node.add_to_observation_distribution(observation_found)
         node.particle_filter.append(node.state)
+        node.add_to_observation_distribution(observation_found)
         node.update(action, R)
 
         observation_found.append(observation)

@@ -148,7 +148,7 @@ class POMCPDPW(object):
         while it < self.max_it:
             
             # a. Sampling the belief state for simulation
-            if len(root.particle_filter) == 0:
+            if len(root.particle_filter) < self.k:
                 beliefState = problem.sample_state(root.state)
             else:
                 beliefState = random.sample(root.particle_filter,1)[0]

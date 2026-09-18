@@ -437,7 +437,8 @@ class ContinuousInspectionProblem:
         dist_map[start_idx] = 0.0
 
         # 8 connectivity
-        neighbors = [(-1,0),(1,0),(0,-1),(0,1)]
+        neighbors = [(-1,0),(1,0),(0,-1),(0,1),
+                     (-1,-1),(1,1),(-1,1),(1,-1)]
 
         while pq:
             dist, (x, y) = heapq.heappop(pq)
@@ -459,7 +460,7 @@ class ContinuousInspectionProblem:
                 if cost >= self.map.eta * self.map.max_cost:
                     continue
 
-                step_cost = 1.0 + cost  # you can tune this
+                step_cost = 0.1 + cost  # you can tune this
                 new_dist = dist + step_cost
 
                 if new_dist < dist_map[nx, ny]:
@@ -503,10 +504,10 @@ class ContinuousInspectionProblem:
         free_spaces = copy.deepcopy(self.unknown_positions)
         dists = np.array(copy.deepcopy(self.unknown_dists))
 
-        # --- convert to weights (closer = higher prob) ---
+        # convert to weights (closer = higher prob)
         dists = np.abs(dists - self.visibility_radius)
-        alpha = 1.0  # tuning parameter
-        weights = np.exp(-alpha * dists)
+        dists_weight = 0.2  # tuning parameter
+        weights = np.exp(-dists_weight * dists)
 
         # avoid degenerate case
         weights += 1e-8
@@ -545,7 +546,7 @@ class ContinuousInspectionProblem:
         while i < len(path_segment) - 1:
             j = len(path_segment) - 1
 
-            # Try to connect i → j directly
+            # Try to connect i to j directly
             while j > i + 1:
                 if self.map.is_visible(smoothed[-1], path_segment[j], self.visibility_radius):
                     break
@@ -563,7 +564,7 @@ class ContinuousInspectionProblem:
         expanded_actions = []
 
         for a in action_sequence:
-            # --- Decode action ---
+            # Decode actions
             if str(a) in self.special_actions:
                 dx, dy = self.special_actions[str(a)]
             else:
@@ -577,7 +578,7 @@ class ContinuousInspectionProblem:
             start_idx = self.map.world_to_map(*current_pos)
             goal_idx  = self.map.world_to_map(*local_target)
 
-            # --- A* (same as before) ---
+            # Performing A* search
             open_set = []
             heapq.heappush(open_set, (0.0, start_idx))
 
@@ -623,7 +624,7 @@ class ContinuousInspectionProblem:
                         heapq.heappush(open_set, (f_score, neighbor))
                         came_from[neighbor] = current
 
-            # --- Reconstruct local path ---
+            # Reconstruct local path
             local_path = []
             current = goal_idx
 
@@ -634,13 +635,12 @@ class ContinuousInspectionProblem:
                     pos_w = self.map.map_to_world(current[0] + 0.5, current[1] + 0.5)
                     local_path.append(pos_w)
                     current = came_from[current]
-
                 local_path.reverse()
 
-            # --- 🔥 NEW: Smooth THIS segment ---
+            # Segmentation smoothing
             local_path = self.smooth_segment(local_path)
 
-            # --- Append with action repetition ---
+            # Append the local path to the full path
             for p in local_path:
                 full_path.append(p)
                 expanded_actions.append(a)

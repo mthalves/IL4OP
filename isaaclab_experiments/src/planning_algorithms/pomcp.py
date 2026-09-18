@@ -81,7 +81,7 @@ class POMCP(object):
             return self.rollout(rollout_node, problem)
         
         # 3. Selecting the best action
-        action = node.select_action(mode='ucb') 
+        action = node.select_action(coef=self.c,mode='ucb') 
 
         # 4. Simulating the action
         (action_node, reward) = self.simulate_action(node, action)
@@ -126,7 +126,7 @@ class POMCP(object):
         while it < self.max_it:
             
             # a. Sampling the belief state for simulation
-            if len(root.particle_filter) == 0:
+            if len(root.particle_filter) < self.k:
                 beliefState = problem.sample_state(root.state)
             else:
                 beliefState = random.sample(root.particle_filter,1)[0]

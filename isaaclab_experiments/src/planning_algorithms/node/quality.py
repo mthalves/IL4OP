@@ -135,7 +135,8 @@ class ANode(QNode):
     def add_child(self, observation):
         # if the node with such observation already exists, return it
         for child in self.children:
-            if child.state.observation_is_equal(observation):
+            child_observation = child.state.get_observation()
+            if child.state.observation_is_equal(child_observation, observation):
                 return child
             
         # else, create a new one

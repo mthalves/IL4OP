@@ -25,48 +25,46 @@ class TBRhoPOMCP(object):
         self.time_budget            = kwargs.get('time_budget', 2.0) # time budget in seconds
         self.start_time_budget = time.time()
         
-
-    def rhofunction(self,particles,action):
+    def rhofunction(self, particles, action):
         belief_reward = 0.0
+        norm = 0.0
+        for p in particles:
+            state = p[0]
+            weight = p[1]
 
-        norm = 0
-        if isinstance(particles,dict):
-            # calculating belief 
-            for key in particles:
-                tmp_state = particles[key][0].copy()
-                state,reward, _, _ = tmp_state.step(action)
-                
-                trans_p = (state.get_trans_p(action))[1]
-                obs_p = (state.get_obs_p(action))[1]
-                belief_reward += reward*trans_p*obs_p*particles[key][1]
-                norm += particles[key][1]
-        else:
-            # calculating belief 
-            for particle in particles:
-                tmp_state = particle.copy()
-                state,reward, _, _ = tmp_state.step(action)
-                
-                trans_p = (state.get_trans_p(action))[1]
-                obs_p = (state.get_obs_p(action))[1]
-                belief_reward += reward*trans_p*obs_p
-                norm += 1
-        return belief_reward/self.smallbag_size
+            tmp_state = state.copy()
+            _, reward, _, _ = tmp_state.step(action)
 
-    def importance_sampling(self,smallbag,action,next_state):
+            belief_reward += weight * reward
+            norm += weight
+        if norm == 0:
+            return 0
+        return belief_reward / norm
+    
+    def rhofunction_smallbag(self, smallbag, action):
+        belief_reward = 0.0
+        for state in smallbag:
+            tmp_state = state.copy()
+            _, reward, _, _ = tmp_state.step(action)
+            belief_reward += reward
+        return belief_reward / len(smallbag)
+
+    def importance_sampling(self,smallbag,next_state,action,next_obs):
         next_smallbag = []
         next_smallbag.append(next_state)
-
         while len(next_smallbag) < self.smallbag_size:
             # (1) sampling the particle from smallbag
             particle = random.choice(smallbag)
 
             # (2) generating particle' from particle using G
             tmp_state = particle.copy()
-            state,reward, _, _ = tmp_state.step(action)
+            state, _, _, _ = tmp_state.step(action)
 
             # (3) storing the generated particle particle' in the new smallbag
-            next_smallbag.append(state)
-        
+            if state.observation_is_equal(next_obs):
+                next_smallbag.append(state)
+            else:
+                next_smallbag.append(next_state)
         return next_smallbag
 
     def simulate_action(self, node, action):
@@ -90,18 +88,17 @@ class TBRhoPOMCP(object):
         action = self.rollout_policy(node.state)
 
         # 3. Simulating the action
-        next_state, reward, _, _ = node.state.step(action)
+        next_state, _, _, _ = node.state.step(action)
         node.state = next_state
+        next_obs = next_state.get_observation()
         node.observation = next_state.get_observation()
         node.depth += 2
 
-        next_smallbag = self.importance_sampling(smallbag,action,node.state)
+        next_smallbag = self.importance_sampling(smallbag, next_state, action, next_obs)
 
         # 4. Rolling out
-        R = self.rhofunction(smallbag, action) +\
+        return self.rhofunction_smallbag(smallbag, action) +\
             self.discount_factor*self.rollout(node,problem,next_smallbag)
-        return R
-
 
     def get_rollout_node(self,node):
         obs = node.state.get_observation()
@@ -109,17 +106,13 @@ class TBRhoPOMCP(object):
         depth = node.depth
         return RhoONode(observation=obs,state=tmp_state,depth=depth,parent=None)
 
-
     def is_leaf(self, node):
         if node.depth >= self.max_depth + 1:
             return True
         return False
 
     def is_terminal(self, node):
-        if (time.time() - self.start_time_budget) > self.time_budget:
-            return True
         return node.state.is_final_state()
-
     
     def simulate(self, node, problem, smallbag):
         # 1. Checking the stop condition
@@ -133,7 +126,7 @@ class TBRhoPOMCP(object):
         if node.children == []:
             # a. adding the children
             for action in node.actions:
-                (next_node, reward) = self.simulate_action(node, action)
+                (next_node, _) = self.simulate_action(node, action)
                 node.children.append(next_node)
             rollout_node = self.get_rollout_node(node)
             return self.rollout(rollout_node, problem, smallbag)
@@ -142,7 +135,8 @@ class TBRhoPOMCP(object):
         action = node.select_action(mode='ucb') 
 
         # 4. Simulating the action
-        (action_node, reward) = self.simulate_action(node, action)
+        (action_node, _) = self.simulate_action(node, action)
+        observation = action_node.state.get_observation()
 
         # 5. Adding the action child on the tree
         if action_node.action in [c.action for c in node.children]:
@@ -157,32 +151,33 @@ class TBRhoPOMCP(object):
 
         # 6. Getting the observation and adding the observation child on the tree
         observation_node = None
-        observation = action_node.state.get_observation()
-
         for child in action_node.children:
             if action_node.state.observation_is_equal(child.observation, observation):
                 observation_node = child
                 observation_node.state = action_node.state.copy()
+                observation_node.particle_filter.append(action_node.state)
                 break
         
         if observation_node is None:
             observation_node = action_node.add_child(observation)
+            observation_node.particle_filter.append(observation_node.state)
         observation_node.visits += 1
 
         # 7. Generating the new smallbag
-        next_smallbag = self.importance_sampling(smallbag,action,observation_node.state)
-        for particle in smallbag:
-            node.particle_filter.append(particle)
-            node.add_to_cummulative_bag(particle,action)
-        node.particle_filter.append(node.state)
-        node.add_to_cummulative_bag(node.state,action)
+        next_smallbag = self.importance_sampling(smallbag,observation_node.state, action, observation)
+
+        # 8. Updating the particle filter
+        for state in smallbag:
+            node.particle_filter.append(state.copy())
+        node.particle_filter.append(node.state.copy())
 
         # 8. Calculating the reward, quality and updating the node
+        for state in next_smallbag:
+            weight = state.get_obs_p(action)
+            observation_node.add_to_cummulative_bag(state, weight)
+
         R = self.rhofunction(node.cummulative_bag, action) + \
             float(self.discount_factor * self.simulate(observation_node,problem,next_smallbag))
-        
-        # - node update
-        node.particle_filter.append(node.state)
         node.update(action, R)
         return R
     

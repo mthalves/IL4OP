@@ -56,7 +56,7 @@ class CNode(Node):
 
         return prob_distribution
 
-    def get_best_action(self,mode='max'):
+    def get_best_action(self,mode='max', *args, **kwargs):
         # 1. Intialising the support variables
         # - maximisation
         if mode == 'max' or mode == 'ucb':

@@ -164,7 +164,7 @@ class ContinuousEventCfg:
                 "args": {
                     "map_size_w"                : (17, 17),     # in meters
                     "z_min":    0.1, "z_max"    : 1.0,
-                    "resolution"                : 0.2, 
+                    "resolution"                : 0.05, 
                     "confirm_threshold"         : 2,            # obstacle ray hitting confirmation thereshold
                     "robot_radius"              : 0.5,          # robot radius (in meters)
                     "inflation_radius"          : 1.5,          # inflation for obstacle avoidance (in meters)
