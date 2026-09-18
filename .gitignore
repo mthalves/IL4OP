@@ -1,5 +1,12 @@
+# Vendored IsaacLab: ignore its local/dot files only, sources stay tracked
 IsaacLab/.*
 IsaacLab/pytest*
+
+# Experiment results (keep the analysis scripts under logs/)
+logs/*
+!logs/*.py
+!logs/src/
+outputs/
 
 # Byte-compiled / optimized / DLL files
 *__pycache__*
