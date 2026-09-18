@@ -82,6 +82,14 @@ Publicly available to foster research! :sparkles:
 - We let the necessary code for plotting and analysing the results ready and available in the `logs` directory. 
 - Easy to run, easy to analyse. :kissing_smiling_eyes:
 
+### 4. (Optional) Train the low-level navigation policy:
+- A pretrained policy is shipped in `isaaclab_experiments/policies/`. To retrain it with RSL-RL or skrl:
+   ```bash
+   python isaaclab_experiments/train_rsl_rl.py --task Anymal-C-Planning-v0 --headless
+   python isaaclab_experiments/train_skrl.py   --task Anymal-C-Planning-v0 --headless
+   ```
+- Checkpoints and TensorBoard logs are written to `logs/rsl_rl/` and `logs/skrl/`.
+
 
 ## :computer: In development & Future directions
 
