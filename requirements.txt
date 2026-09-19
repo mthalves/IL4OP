@@ -1,0 +1,14 @@
+# Project dependencies on top of IsaacSim 5.1.0 / IsaacLab 2.3.2.
+# torch, numpy and gymnasium are provided by the IsaacLab installation.
+
+# Reinforcement learning (navigation policy training)
+rsl-rl-lib==3.1.2
+skrl==1.4.3
+
+# Result analysis (logs/)
+matplotlib==3.10.3
+pandas==3.0.1
+scipy==1.15.3
+
+# Utilities
+packaging>=23.0

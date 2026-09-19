@@ -24,7 +24,11 @@ Publicly available to foster research! :sparkles:
    - We recommend installing IsaacSim via `pip` and using `conda` as the virtual environment.  
    - The repository already contains the correct working version of IsaacLab (`2.3.2`), so **skip cloning IsaacLab manually**.  
 
-2. Install the `isaaclab-experiment` folder using `pip install -e .`
+2. Install the project dependencies and the package in editable mode:
+   ```bash
+   pip install -r requirements.txt
+   pip install -e .
+   ```
 
 3. You’re ready to run our environment :sunglasses:
 
