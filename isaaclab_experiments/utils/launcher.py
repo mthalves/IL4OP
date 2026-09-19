@@ -16,6 +16,17 @@ import logging
 # local imports
 from isaaclab_experiments.utils.cli_args import add_rsl_rl_args, update_rsl_rl_cfg
 
+
+def str2bool(value):
+    """Parse boolean command-line values such as ``--log True`` or ``--log false``."""
+    if isinstance(value, bool):
+        return value
+    if value.lower() in ("true", "1", "yes"):
+        return True
+    if value.lower() in ("false", "0", "no"):
+        return False
+    raise argparse.ArgumentTypeError(f"Boolean value expected, got '{value}'.")
+
 class TrainRslRLApp:
 
     def __init__(self):
@@ -399,9 +410,9 @@ class PlanningApp:
         parser.add_argument(
             "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
         )
-        parser.add_argument("--follow_camera", default=True, help="Make the camera follow the robot.")
+        parser.add_argument("--follow_camera", type=str2bool, default=True, help="Make the camera follow the robot.")
         # log
-        parser.add_argument("--log", default=False, help="Log info from the experiments.")
+        parser.add_argument("--log", type=str2bool, default=False, help="Log info from the experiments.")
         return parser
     
     def check_skrl_version(self, skrl):

@@ -4,6 +4,7 @@ version = "1.0.0"
 description = ""
 authors = ["mthalves <matheus.moog@gmail.com>"]
 packages = [
+    { include = "app" },
     { include = "isaaclab_experiments" }
 ]
 

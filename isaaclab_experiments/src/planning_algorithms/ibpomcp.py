@@ -15,7 +15,7 @@ class IBPOMCP(object):
         self.max_depth              = kwargs.get('max_depth', 20)
         self.max_it                 = kwargs.get('max_it', 1000)
         
-        self.alpha                  = kwargs.get('alpha',0.5) # information weight (alves2023information)
+        self.alpha                  = None # information weight, computed from the root entropy (alves2023information)
         self.discount_factor        = kwargs.get('discount_factor',0.95) # discount factor (historical weight)
         self.particle_revigoration  = kwargs.get('particle_revigoration',True) # enable particle revigoration (silver2010pomcp)
         self.k                      = kwargs.get('k', 100) # particle filter size

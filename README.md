@@ -70,7 +70,14 @@ Publicly available to foster research! :sparkles:
   continuous planners (`pomcpdpw`, `pomcpow`, `pftdpw`) run with `--space continuous`.
 
 ### 2. Run your experiment:
-- For a single experiment:
+- With the graphical launcher (recommended for single experiments):
+   ```bash
+   python -m app
+   ```
+   Pick the problem and planner, adjust the parameters and run options, and start the simulation.
+   The simulator output is shown in the window and the selection is exported to
+   `planning_cfg.local.json` without touching `planning_cfg.py`.
+- From the command line:
    ```bash
    python isaaclab_experiments/planning.py --space discrete --log True
    ```

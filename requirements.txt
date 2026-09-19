@@ -10,5 +10,8 @@ matplotlib==3.10.3
 pandas==3.0.1
 scipy==1.15.3
 
+# Experiment launcher (python -m app)
+PySide6==6.11.1
+
 # Utilities
 packaging>=23.0

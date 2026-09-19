@@ -8,6 +8,9 @@ logs/*
 !logs/src/
 outputs/
 
+# Planner selection exported by the experiment launcher
+*.local.json
+
 # Byte-compiled / optimized / DLL files
 *__pycache__*
 *.py[codz]

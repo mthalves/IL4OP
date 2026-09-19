@@ -9,7 +9,13 @@ the default defined in the planner's ``__init__``.
 Space compatibility:
     discrete   : astar, despot, ibpomcp, pomcp, tbrhopomcp
     continuous : pomcpdpw, pomcpow, pftdpw
+
+The experiment launcher (``python -m app``) exports its selection to a JSON
+file and points ``IL4OP_PLANNER_CFG`` at it, which overrides ``AGENT`` below.
 """
+
+import json
+import os
 
 PLANNER_CFG = {
     # ---------------------------------------------------------------
@@ -26,7 +32,6 @@ PLANNER_CFG = {
     "ibpomcp": {
         "max_depth": 20,
         "max_it": 1000,
-        "alpha": 0.5,
         "q": 0.2,
         "discount_factor": 0.95,
         "particle_revigoration": True,
@@ -97,3 +102,8 @@ AGENT = {
     "name": METHOD,
     "args": {"kwargs": PLANNER_CFG[METHOD]},
 }
+
+_override = os.environ.get("IL4OP_PLANNER_CFG")
+if _override:
+    with open(_override, encoding="utf-8") as _file:
+        AGENT = json.load(_file)
