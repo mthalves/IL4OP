@@ -266,7 +266,92 @@ class TrainSkrlApp:
         return env_cfg, agent_cfg, log_dir, resume_path
 
 
-class PlayApp:
+def add_play_args(parser):
+    """Arguments shared by the play/evaluation scripts."""
+    parser.add_argument("--video", action="store_true", default=False, help="Record a video of the rollout.")
+    parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+    parser.add_argument(
+        "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
+    )
+    parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+    parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+    parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment.")
+    parser.add_argument(
+        "--use_pretrained_checkpoint", action="store_true", help="Use the pre-trained checkpoint from Nucleus."
+    )
+    parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+    parser.add_argument(
+        "--max_steps", type=int, default=None, help="Stop after this many environment steps (default: run until closed)."
+    )
+
+
+class PlayRslRLApp:
+
+    def __init__(self):
+        # parsing arguments
+        parser = self.parse_args()
+
+        # append RSL-RL cli arguments
+        add_rsl_rl_args(parser)
+        # append AppLauncher cli args
+        AppLauncher.add_app_launcher_args(parser)
+        self.args_cli, hydra_args = parser.parse_known_args()
+        # always enable cameras to record video
+        if self.args_cli.video:
+            self.args_cli.enable_cameras = True
+        # clear out sys.argv for Hydra
+        sys.argv = [sys.argv[0]] + hydra_args
+
+        # launch omniverse app
+        self.app_launcher = AppLauncher(self.args_cli)
+        self.simulation_app = self.app_launcher.app
+
+    def parse_args(self):
+        parser = argparse.ArgumentParser(description="Play and evaluate a checkpoint of an RL agent from RSL-RL.")
+        add_play_args(parser)  # --checkpoint comes from the RSL-RL arguments (path to a model file)
+        parser.add_argument(
+            "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
+        )
+        parser.add_argument(
+            "--export", action="store_true", default=False, help="Export the policy as JIT and ONNX next to the checkpoint."
+        )
+        return parser
+
+    def auto_config(self, args_cli, env_cfg, agent_cfg):
+        """Apply CLI overrides and resolve the checkpoint to load.
+
+        Returns ``(env_cfg, agent_cfg, resume_path)``; ``resume_path`` is ``None`` when no
+        checkpoint could be found.
+        """
+        from isaaclab.utils.assets import retrieve_file_path
+        from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
+        from isaaclab_tasks.utils import get_checkpoint_path
+
+        # override configurations with non-hydra CLI arguments
+        agent_cfg = update_rsl_rl_cfg(agent_cfg, args_cli)
+        env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+        env_cfg.seed = agent_cfg.seed
+        env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+
+        # resolve the checkpoint
+        log_root_path = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
+        print(f"[INFO] Loading experiment from directory: {log_root_path}")
+        if args_cli.use_pretrained_checkpoint:
+            train_task_name = args_cli.task.split(":")[-1].replace("-Play", "")
+            resume_path = get_published_pretrained_checkpoint("rsl_rl", train_task_name)
+            if not resume_path:
+                print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
+                return env_cfg, agent_cfg, None
+        elif args_cli.checkpoint:
+            resume_path = retrieve_file_path(args_cli.checkpoint)
+        else:
+            resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+
+        env_cfg.log_dir = os.path.dirname(resume_path)
+        return env_cfg, agent_cfg, resume_path
+
+
+class PlaySkrlApp:
 
     def __init__(self):
         # parsing arguments
@@ -274,32 +359,30 @@ class PlayApp:
 
         # append AppLauncher cli args
         AppLauncher.add_app_launcher_args(parser)
-        self.args_cli = parser.parse_args()
+        self.args_cli, hydra_args = parser.parse_known_args()
         # always enable cameras to record video
         if self.args_cli.video:
             self.args_cli.enable_cameras = True
         self.algorithm = self.args_cli.algorithm.lower()
+        # clear out sys.argv for Hydra
+        sys.argv = [sys.argv[0]] + hydra_args
 
         # launch omniverse app
         self.app_launcher = AppLauncher(self.args_cli)
         self.simulation_app = self.app_launcher.app
 
-    
     def parse_args(self):
-        # add argparse arguments
-        parser = argparse.ArgumentParser(description="Play a checkpoint of an RL agent from skrl.")
-        parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
-        parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
-        parser.add_argument(
-            "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
-        )
-        parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-        parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+        parser = argparse.ArgumentParser(description="Play and evaluate a checkpoint of an RL agent from skrl.")
+        add_play_args(parser)
         parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
         parser.add_argument(
-            "--use_pretrained_checkpoint",
-            action="store_true",
-            help="Use the pre-trained checkpoint from Nucleus.",
+            "--agent",
+            type=str,
+            default=None,
+            help=(
+                "Name of the RL agent configuration entry point. Defaults to None, in which case the argument "
+                "--algorithm is used to determine the default agent configuration entry point."
+            ),
         )
         parser.add_argument(
             "--ml_framework",
@@ -315,47 +398,59 @@ class PlayApp:
             choices=["AMP", "PPO", "IPPO", "MAPPO"],
             help="The RL algorithm used for training the skrl agent.",
         )
-        parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
         return parser
-    
+
     def check_skrl_version(self, skrl):
-        SKRL_VERSION = "1.4.2"
+        SKRL_VERSION = "1.4.3"
         if version.parse(skrl.__version__) < version.parse(SKRL_VERSION):
             skrl.logger.error(
                 f"Unsupported skrl version: {skrl.__version__}. "
                 f"Install supported version using 'pip install skrl>={SKRL_VERSION}'"
             )
             exit()
-    
-    def init_runner(self, env, experiment_cfg, resume_path, Runner):
-        runner = Runner(env, experiment_cfg)
-        print(f"[INFO] Loading model checkpoint from: {resume_path}")
-        runner.agent.load(resume_path)
-        # set agent to evaluation mode
-        runner.agent.set_running_mode("eval")
-        return runner
 
-    def init_log(self, experiment_cfg):
+    def auto_config(self, args_cli, env_cfg, agent_cfg):
+        """Apply CLI overrides and resolve the checkpoint to load.
+
+        Returns ``(env_cfg, agent_cfg, resume_path)``; ``resume_path`` is ``None`` when no
+        checkpoint could be found.
+        """
+        from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
         from isaaclab_tasks.utils import get_checkpoint_path
-        from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
-        # specify directory for logging experiments (load checkpoint)
-        log_root_path = os.path.join("logs", "skrl", experiment_cfg["agent"]["experiment"]["directory"])
-        log_root_path = os.path.abspath(log_root_path)
+
+        # override configurations with non-hydra CLI arguments
+        env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+        env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+
+        # randomly sample a seed if seed = -1
+        if args_cli.seed == -1:
+            args_cli.seed = random.randint(0, 10000)
+        agent_cfg["seed"] = args_cli.seed if args_cli.seed is not None else agent_cfg["seed"]
+        env_cfg.seed = agent_cfg["seed"]
+
+        # resolve the checkpoint
+        log_root_path = os.path.abspath(os.path.join("logs", "skrl", agent_cfg["agent"]["experiment"]["directory"]))
         print(f"[INFO] Loading experiment from directory: {log_root_path}")
-        # get checkpoint path
-        if self.args_cli.use_pretrained_checkpoint:
-            resume_path = get_published_pretrained_checkpoint("skrl", self.args_cli.task)
+        if args_cli.use_pretrained_checkpoint:
+            train_task_name = args_cli.task.split(":")[-1].replace("-Play", "")
+            resume_path = get_published_pretrained_checkpoint("skrl", train_task_name)
             if not resume_path:
                 print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
-                return
-        elif self.args_cli.checkpoint:
-            resume_path = os.path.abspath(self.args_cli.checkpoint)
+                return env_cfg, agent_cfg, None
+        elif args_cli.checkpoint:
+            resume_path = os.path.abspath(args_cli.checkpoint)
         else:
             resume_path = get_checkpoint_path(
-                log_root_path, run_dir=f".*_{self.algorithm}_{self.args_cli.ml_framework}", other_dirs=["checkpoints"]
+                log_root_path, run_dir=f".*_{self.algorithm}_{args_cli.ml_framework}", other_dirs=["checkpoints"]
             )
-        log_dir = os.path.dirname(os.path.dirname(resume_path))
-        return log_dir, resume_path
+
+        env_cfg.log_dir = os.path.dirname(os.path.dirname(resume_path))
+        # evaluation only: no TensorBoard logging, no checkpoints
+        agent_cfg["trainer"]["close_environment_at_exit"] = False
+        agent_cfg["agent"]["experiment"]["write_interval"] = 0
+        agent_cfg["agent"]["experiment"]["checkpoint_interval"] = 0
+        return env_cfg, agent_cfg, resume_path
+
 
 class PlanningApp:
 

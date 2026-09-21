@@ -3,7 +3,7 @@
 
 # Reinforcement learning (navigation policy training)
 rsl-rl-lib==3.1.2
-skrl==1.4.3
+skrl==2.1.0
 
 # Result analysis (logs/)
 matplotlib==3.10.3

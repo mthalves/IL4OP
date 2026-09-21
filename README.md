@@ -99,8 +99,28 @@ Publicly available to foster research! :sparkles:
    python isaaclab_experiments/train_skrl.py   --task Anymal-C-Planning-v0 --headless
    ```
 - Checkpoints and TensorBoard logs are written to `logs/rsl_rl/` and `logs/skrl/`.
+- To play and evaluate a trained policy, use the matching play script. It loads the latest run of the
+  task (or `--checkpoint <file>`), runs the policy and reports episode statistics; `--max_steps` bounds the
+  evaluation, `--video` records a rollout and `--export` (RSL-RL) writes JIT/ONNX policies next to the checkpoint:
+   ```bash
+   python isaaclab_experiments/play_rsl_rl.py --task Anymal-C-Planning-v0 --num_envs 32 --max_steps 1100 --headless
+   python isaaclab_experiments/play_skrl.py   --task Anymal-C-Planning-v0 --checkpoint <path/to/agent.pt>
+   ```
 
-### 5. (Optional) Train the Unitree Go2W locomotion policies:
+### 5. (Optional) Train the Unitree Go1 locomotion policies:
+- `isaaclab_experiments/go1_locomotion/` is a standalone copy of IsaacLab's Go1 velocity task (base
+  configuration, MDP terms and agents), so it can be modified without touching the vendored IsaacLab:
+
+  | Task | Description |
+  |---|---|
+  | `IL4OP-Velocity-Flat-Unitree-Go1-v0` (`-Play-v0`) | flat terrain |
+  | `IL4OP-Velocity-Rough-Unitree-Go1-v0` (`-Play-v0`) | rough terrain with curriculum |
+
+   ```bash
+   python isaaclab_experiments/train_rsl_rl.py --task IL4OP-Velocity-Rough-Unitree-Go1-v0 --headless
+   ```
+
+### 6. (Optional) Train the Unitree Go2W locomotion policies:
 - These tasks build on [robot_lab](https://github.com/fan-ziqi/robot_lab) (`v2.3.2`), which provides the Go2W
   robot description and the base velocity-tracking task. Install it next to the repository:
    ```bash
