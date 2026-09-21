@@ -30,6 +30,7 @@ from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper
 
 import isaaclab_tasks  # noqa: F401
 import isaaclab_experiments.anymal_c_planning  # noqa: F401
+import isaaclab_experiments.go1_locomotion  # noqa: F401
 
 # Go2W locomotion tasks depend on robot_lab; skip them when it is not installed
 try:
