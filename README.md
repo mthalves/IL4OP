@@ -51,7 +51,6 @@ Publicly available to foster research! :sparkles:
       "ibpomcp": {
          "max_depth": 20,
          "max_it": 1000,
-         "alpha": 0.5,
          "q": 0.2,
          "discount_factor": 0.95,
          "particle_revigoration": True,
@@ -100,6 +99,27 @@ Publicly available to foster research! :sparkles:
    python isaaclab_experiments/train_skrl.py   --task Anymal-C-Planning-v0 --headless
    ```
 - Checkpoints and TensorBoard logs are written to `logs/rsl_rl/` and `logs/skrl/`.
+
+### 5. (Optional) Train the Unitree Go2W locomotion policies:
+- These tasks build on [robot_lab](https://github.com/fan-ziqi/robot_lab) (`v2.3.2`), which provides the Go2W
+  robot description and the base velocity-tracking task. Install it next to the repository:
+   ```bash
+   git clone --branch v2.3.2 https://github.com/fan-ziqi/robot_lab.git
+   pip install -e robot_lab/source/robot_lab --config-settings editable_mode=compat
+   ```
+- Three variants are registered in `isaaclab_experiments/go2w_locomotion/`:
+
+  | Task | Description |
+  |---|---|
+  | `IL4OP-Velocity-Flat-Unitree-Go2W-v0` | flat terrain |
+  | `IL4OP-Velocity-Rough-Unitree-Go2W-v0` | rough terrain with curriculum |
+  | `IL4OP-Velocity-Flat-Z-Unitree-Go2W-v0` | flat terrain with a **commanded base height** (0.25 - 0.40 m) |
+
+   ```bash
+   python isaaclab_experiments/train_rsl_rl.py --task IL4OP-Velocity-Flat-Z-Unitree-Go2W-v0 --headless
+   ```
+- The `Flat-Z` variant adds a `base_height` command to the observations and the reward terms
+  `base_height_penalty`, `go2w_joint_mirror` and `wheel_position_penalty` (see `go2w_locomotion/mdp/`).
 
 
 ## :computer: In development & Future directions

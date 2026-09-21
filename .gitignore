@@ -11,6 +11,9 @@ outputs/
 # Planner selection exported by the experiment launcher
 *.local.json
 
+# External robot_lab checkout (see README)
+robot_lab/
+
 # Byte-compiled / optimized / DLL files
 *__pycache__*
 *.py[codz]
