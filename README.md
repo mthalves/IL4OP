@@ -101,8 +101,25 @@ The pretrained Anymal-C navigation policies **are** included, so the planning ex
 work right after the installation.
 
 ### Troubleshooting
-- `ModuleNotFoundError: pkg_resources` while installing the IsaacLab extensions ->
-  `pip install "setuptools<82"` and run the step again;
+- `Could not load PyInstaller's embedded PKG archive ... (/root/miniconda3/_conda)` -> conda was
+  installed as **root** (with `sudo`) and your user cannot read it, or the installer download was
+  truncated. Remove it (`sudo rm -rf /root/miniconda3`), drop any `conda init` block that points
+  there from your `~/.bashrc`, and run `./setup.sh --install-conda` **without sudo**;
+- `conda: command not found` after `--install-conda` -> the batch installer does not touch the
+  shell configuration; the script runs `conda init` for you, so open a new terminal (`exec $SHELL`);
+- `CondaToSNonInteractiveError` (Terms of Service of the Anaconda channels not accepted) ->
+  `setup.sh` creates the environment from `conda-forge` only and is not affected; if another
+  conda command raises it, either accept the terms with `conda tos accept --override-channels
+  --channel https://repo.anaconda.com/pkgs/main` (and the same for `.../pkgs/r`) or create the
+  environment with `-c conda-forge --override-channels` and use `--use-current-env`;
+- `ModuleNotFoundError: pkg_resources` when building `flatdict` -> `flatdict` has no wheel and
+  its `setup.py` imports `pkg_resources`, which setuptools 82 removed; pip builds it in an
+  isolated environment with the newest setuptools, so it has to be built against an older one
+  (`setup.sh` does this automatically):
+  ```bash
+  pip install "setuptools<82" wheel
+  pip install flatdict==4.0.1 --no-build-isolation
+  ```
 - the training and play scripts import `utils.launcher`, so they must be started from the
   repository root as `python isaaclab_experiments/<script>.py`.
 
