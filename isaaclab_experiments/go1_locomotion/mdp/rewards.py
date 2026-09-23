@@ -118,3 +118,26 @@ def stand_still_joint_deviation_l1(
     command = env.command_manager.get_command(command_name)
     # Penalize motion when command is nearly zero.
     return mdp.joint_deviation_l1(env, asset_cfg) * (torch.norm(command[:, :2], dim=1) < command_threshold)
+
+
+def feet_stance_width(env, asset_cfg: SceneEntityCfg, min_distance: float) -> torch.Tensor:
+    """Penalize a stance narrower than ``min_distance``.
+
+    The lateral (base-frame y) separation of the front and of the rear foot pair is
+    compared against ``min_distance``, and only stances narrower than that are penalized.
+    The term therefore sets a lower bound on the stance width — it does not prescribe a
+    gait, tie the two body sides together or reward any particular foot placement above
+    the bound.
+
+    ``asset_cfg.body_names`` must list the four feet as
+    (front-left, front-right, rear-left, rear-right) with ``preserve_order=True``.
+    """
+    asset = env.scene[asset_cfg.name]
+    # feet position relative to the base, expressed in the base frame
+    offset_w = asset.data.body_link_pos_w[:, asset_cfg.body_ids] - asset.data.root_link_pos_w.unsqueeze(1)
+    quat = asset.data.root_link_quat_w.unsqueeze(1).expand(-1, offset_w.shape[1], -1)
+    pos_b = quat_apply_inverse(quat.reshape(-1, 4), offset_w.reshape(-1, 3)).reshape(offset_w.shape)
+
+    front = torch.abs(pos_b[:, 0, 1] - pos_b[:, 1, 1])
+    rear = torch.abs(pos_b[:, 2, 1] - pos_b[:, 3, 1])
+    return (min_distance - front).clip(min=0.0) + (min_distance - rear).clip(min=0.0)
