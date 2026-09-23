@@ -5,6 +5,7 @@
 #   ./setup.sh                     # create the "IL4OP" conda environment and install everything
 #   ./setup.sh --with-robot-lab    # also install robot_lab (needed by the Go2W tasks)
 #   ./setup.sh --use-current-env   # install into the environment that is already active
+#   ./setup.sh --install-conda     # download and install Miniconda if conda is missing
 #   ./setup.sh --dry-run           # only print what would be executed
 #
 set -euo pipefail
@@ -17,13 +18,16 @@ ISAACSIM_VERSION="5.1.0"
 ISAACSIM_INDEX="https://pypi.nvidia.com"
 ROBOT_LAB_TAG="v2.3.2"
 ROBOT_LAB_URL="https://github.com/fan-ziqi/robot_lab.git"
+MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
 
 # the six extensions of the vendored IsaacLab, installed editable from this repository
 ISAACLAB_EXTENSIONS=(isaaclab isaaclab_assets isaaclab_contrib isaaclab_mimic isaaclab_rl isaaclab_tasks)
 
 USE_CURRENT_ENV=0
 WITH_ROBOT_LAB=0
+INSTALL_CONDA=0
 DRY_RUN=0
+CONDA_BASE=""
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -42,11 +46,80 @@ run() {
     [ "$DRY_RUN" -eq 1 ] || "$@"
 }
 
+find_conda_base() {
+    if command -v conda >/dev/null 2>&1; then
+        conda info --base 2>/dev/null && return 0
+    fi
+    local prefix
+    for prefix in "$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" "$HOME/mambaforge" "/opt/conda"; do
+        if [ -x "$prefix/bin/conda" ]; then
+            echo "$prefix"
+            return 0
+        fi
+    done
+    return 1
+}
+
+install_miniconda() {
+    local installer="${TMPDIR:-/tmp}/miniconda-installer.sh"
+    log "Installing Miniconda into $HOME/miniconda3"
+    command -v curl >/dev/null 2>&1 || die "curl is required to download Miniconda"
+    run curl -fsSL "$MINICONDA_URL" -o "$installer"
+    run bash "$installer" -b -p "$HOME/miniconda3"
+    run rm -f "$installer"
+    CONDA_BASE="$HOME/miniconda3"
+}
+
+# locate conda, check that the installation is usable and load its shell hook
+ensure_conda() {
+    local base
+    if base="$(find_conda_base)" && [ -n "$base" ]; then
+        CONDA_BASE="$base"
+    elif [ "$INSTALL_CONDA" -eq 1 ]; then
+        install_miniconda
+    else
+        die "conda was not found.
+
+  Install Miniconda:
+      curl -fsSL $MINICONDA_URL -o /tmp/miniconda.sh
+      bash /tmp/miniconda.sh -b -p \$HOME/miniconda3
+      \$HOME/miniconda3/bin/conda init bash && exec bash
+
+  or re-run this script with --install-conda,
+  or with --use-current-env to install into the active Python environment."
+    fi
+
+    local hook="$CONDA_BASE/etc/profile.d/conda.sh"
+    [ -f "$hook" ] || die "conda was found at $CONDA_BASE but $hook is missing: the installation looks incomplete"
+
+    # shellcheck disable=SC1090
+    source "$hook"
+    command -v conda >/dev/null 2>&1 || die "could not initialise conda from $hook"
+    conda --version >/dev/null 2>&1 || die "'conda --version' failed: the conda installation at $CONDA_BASE is broken"
+    echo "    $(conda --version) at $CONDA_BASE"
+}
+
+# make sure the interpreter that will receive the packages is the expected one
+verify_active_env() {
+    command -v python >/dev/null 2>&1 || die "no python on PATH after activating the environment"
+
+    local prefix version
+    prefix="$(python -c 'import sys; print(sys.prefix)')"
+    version="$(python -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+
+    [ "$version" = "$PYTHON_VERSION" ] || die "the active environment runs Python $version, but IL4OP requires $PYTHON_VERSION"
+    python -m pip --version >/dev/null 2>&1 || die "pip is not available in $prefix"
+    [ "${CONDA_DEFAULT_ENV:-}" = "base" ] && warn "installing into the conda 'base' environment is not recommended"
+
+    echo "    Python $version at $prefix"
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --env) ENV_NAME="$2"; shift 2 ;;
         --use-current-env) USE_CURRENT_ENV=1; shift ;;
         --with-robot-lab) WITH_ROBOT_LAB=1; shift ;;
+        --install-conda) INSTALL_CONDA=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         -h|--help) usage ;;
         *) die "unknown option: $1 (use --help)" ;;
@@ -58,20 +131,23 @@ cd "$REPO_ROOT"
 
 # ---------------------------------------------------------------- environment
 if [ "$USE_CURRENT_ENV" -eq 1 ]; then
-    log "Using the active environment: $(python -c 'import sys; print(sys.prefix)' 2>/dev/null || echo unknown)"
+    log "Using the environment that is already active"
+    verify_active_env
 else
-    command -v conda >/dev/null 2>&1 || die "conda not found; install Miniconda or pass --use-current-env"
+    log "Checking the conda installation"
+    ensure_conda
+
     log "Preparing the '$ENV_NAME' conda environment (Python $PYTHON_VERSION)"
-    if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
+    if conda env list | awk '$1 != "#" {print $1}' | grep -qx "$ENV_NAME"; then
         echo "    environment already exists, reusing it"
     else
         run conda create -y -n "$ENV_NAME" "python=$PYTHON_VERSION"
     fi
-    # make `conda activate` usable inside a non-interactive shell
+
+    # `conda activate` needs the hook that ensure_conda already sourced
     if [ "$DRY_RUN" -eq 0 ]; then
-        # shellcheck disable=SC1091
-        source "$(conda info --base)/etc/profile.d/conda.sh"
-        conda activate "$ENV_NAME"
+        conda activate "$ENV_NAME" || die "could not activate '$ENV_NAME'"
+        verify_active_env
     else
         printf '    $ conda activate %s\n' "$ENV_NAME"
     fi

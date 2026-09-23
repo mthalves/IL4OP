@@ -21,7 +21,7 @@ Publicly available to foster research! :sparkles:
 
 ### Requirements
 - Linux (tested on Ubuntu 22.04), an NVIDIA GPU and a driver supporting **CUDA 12.8**;
-- [Miniconda](https://docs.conda.io/projects/miniconda/) (or any Python **3.11** environment);
+- [Miniconda](https://docs.conda.io/projects/miniconda/) (or any Python **3.11** environment) — `setup.sh` checks it and can install it with `--install-conda`;
 - ~40 GB of free disk space for Isaac Sim and its asset cache.
 
 ### Quick setup
@@ -30,9 +30,17 @@ git clone git@github.com:mthalves/IL4OP.git && cd IL4OP
 ./setup.sh                  # add --with-robot-lab to also enable the Go2W tasks
 conda activate IL4OP
 ```
-The script creates the `IL4OP` conda environment and installs PyTorch `2.7.0+cu128`,
-IsaacSim `5.1.0`, the **vendored** IsaacLab `2.3.2` and this package. Useful flags:
-`--use-current-env` (install into the active environment), `--env NAME`, `--dry-run`.
+The script verifies the conda installation, creates the `IL4OP` environment and installs
+PyTorch `2.7.0+cu128`, IsaacSim `5.1.0`, the **vendored** IsaacLab `2.3.2` and this package,
+checking along the way that the packages land in a Python 3.11 environment. Useful flags:
+
+| Flag | Effect |
+|---|---|
+| `--with-robot-lab` | also clone and install `robot_lab` for the Go2W tasks |
+| `--install-conda` | download and install Miniconda when conda is missing |
+| `--use-current-env` | install into the environment that is already active |
+| `--env NAME` | use another environment name (default: `IL4OP`) |
+| `--dry-run` | print the commands without running them |
 
 ### Manual setup
 <details>
