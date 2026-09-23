@@ -1,5 +1,5 @@
 # IL4OP  
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/) [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-green)](https://isaac-sim.github.io/IsaacLab/)
+[![Python](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org/) [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-green)](https://isaac-sim.github.io/IsaacLab/)
 
 IL4OP is a modified and extended version of **IsaacLab** designed to support **online planning under uncertainty** in robotic environments. It adapts IsaacLab's flexibility to advance research in online planning, with ready-to-use components for benchmarking, testing, and experimentation.  
 
@@ -19,18 +19,84 @@ Publicly available to foster research! :sparkles:
 
 ## :gear: Installation
 
-1. Follow the IsaacSim [`5.1.0`]/IsaacLab [`2.3.2`] installation steps here:  
-   :point_right: https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/pip_installation.html  
-   - We recommend installing IsaacSim via `pip` and using `conda` as the virtual environment.  
-   - The repository already contains the correct working version of IsaacLab (`2.3.2`), so **skip cloning IsaacLab manually**.  
+### Requirements
+- Linux (tested on Ubuntu 22.04), an NVIDIA GPU and a driver supporting **CUDA 12.8**;
+- [Miniconda](https://docs.conda.io/projects/miniconda/) (or any Python **3.11** environment);
+- ~40 GB of free disk space for Isaac Sim and its asset cache.
 
-2. Install the project dependencies and the package in editable mode:
-   ```bash
-   pip install -r requirements.txt
-   pip install -e .
-   ```
+### Quick setup
+```bash
+git clone git@github.com:mthalves/IL4OP.git && cd IL4OP
+./setup.sh                  # add --with-robot-lab to also enable the Go2W tasks
+conda activate IL4OP
+```
+The script creates the `IL4OP` conda environment and installs PyTorch `2.7.0+cu128`,
+IsaacSim `5.1.0`, the **vendored** IsaacLab `2.3.2` and this package. Useful flags:
+`--use-current-env` (install into the active environment), `--env NAME`, `--dry-run`.
 
-3. You’re ready to run our environment :sunglasses:
+### Manual setup
+<details>
+<summary>The same steps, one by one</summary>
+
+```bash
+# 1. environment
+conda create -n IL4OP python=3.11 -y && conda activate IL4OP
+pip install --upgrade pip
+
+# 2. PyTorch (CUDA 12.8), installed first so that pip keeps this exact build
+pip install torch==2.7.0 torchvision --index-url https://download.pytorch.org/whl/cu128
+
+# 3. Isaac Sim
+pip install 'isaacsim[all,extscache]==5.1.0' --extra-index-url https://pypi.nvidia.com
+
+# 4. the vendored IsaacLab 2.3.2 -- install it from this repository, never from pip
+for ext in isaaclab isaaclab_assets isaaclab_contrib isaaclab_mimic isaaclab_rl isaaclab_tasks; do
+    pip install -e IsaacLab/source/$ext
+done
+
+# 5. this project
+pip install -r requirements.txt
+pip install -e .
+```
+</details>
+
+### Go2W tasks (optional)
+The Unitree Go2W tasks build on [robot_lab](https://github.com/fan-ziqi/robot_lab), which is
+not part of this repository:
+```bash
+git clone --branch v2.3.2 https://github.com/fan-ziqi/robot_lab.git
+pip install -e robot_lab/source/robot_lab --no-deps --config-settings editable_mode=compat
+```
+`editable_mode=compat` is required: with the default editable install, `import robot_lab`
+resolves to the empty `robot_lab/` directory of this repository instead of the package.
+
+### Verify
+```bash
+python tools/check_environment.py
+```
+Then run a two-iteration training as an end-to-end test:
+```bash
+python isaaclab_experiments/train_rsl_rl.py --task IL4OP-Velocity-Flat-Unitree-Go1-v0 \
+    --num_envs 32 --max_iterations 2 --headless
+```
+:warning: The **first** Isaac Sim start downloads shader and asset caches and can take
+10-20 minutes without printing anything. This is expected, not a hang.
+
+### What a fresh clone does not contain
+| Not in the clone | Consequence |
+|---|---|
+| `logs/` | Training runs and checkpoints are ignored by git; copy them manually to evaluate or resume a policy |
+| `robot_lab/` | The Go2W tasks stay unavailable until it is installed (the scripts warn and continue) |
+| `outputs/` | Hydra run directories, not needed |
+
+The pretrained Anymal-C navigation policies **are** included, so the planning experiments
+work right after the installation.
+
+### Troubleshooting
+- `ModuleNotFoundError: pkg_resources` while installing the IsaacLab extensions ->
+  `pip install "setuptools<82"` and run the step again;
+- the training and play scripts import `utils.launcher`, so they must be started from the
+  repository root as `python isaaclab_experiments/<script>.py`.
 
 ## :arrow_forward: Running Experiments
 
