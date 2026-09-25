@@ -20,7 +20,8 @@ Publicly available to foster research! :sparkles:
 ## :gear: Installation
 
 ### Requirements
-- Linux (tested on Ubuntu 22.04), an NVIDIA GPU and a driver supporting **CUDA 12.8**;
+- Linux with an NVIDIA GPU. Isaac Sim 5.1 officially supports **Ubuntu 22.04/24.04** and lists Linux driver **580.65.06** as its tested driver version. See the [Isaac Sim 5.1 requirements](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/requirements.html).
+- This repository has also been validated on **Ubuntu 26.04 + RTX 5090 + NVIDIA 580-open** using the compatibility workaround below. Ubuntu 26.04 is **not officially supported** by Isaac Sim 5.1.
 - [Miniconda](https://docs.conda.io/projects/miniconda/) (or any Python **3.11** environment) — `setup.sh` checks it and can install it with `--install-conda`;
 - ~40 GB of free disk space for Isaac Sim and its asset cache.
 
@@ -29,6 +30,12 @@ Publicly available to foster research! :sparkles:
 git clone git@github.com:mthalves/IL4OP.git && cd IL4OP
 ./setup.sh                  # add --with-robot-lab to also enable the Go2W tasks
 conda activate IL4OP
+
+# First Isaac Sim launch on RTX 5090:
+isaacsim-il4op --reset-user
+
+# Subsequent launches:
+isaacsim-il4op
 ```
 The script verifies the conda installation, creates the `IL4OP` environment and installs
 PyTorch `2.7.0+cu128`, IsaacSim `5.1.0`, the **vendored** IsaacLab `2.3.2` and this package,
@@ -52,7 +59,7 @@ conda create -n IL4OP python=3.11 -y && conda activate IL4OP
 pip install --upgrade pip
 
 # 2. PyTorch (CUDA 12.8), installed first so that pip keeps this exact build
-pip install torch==2.7.0 torchvision --index-url https://download.pytorch.org/whl/cu128
+pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 
 # 3. Isaac Sim
 pip install 'isaacsim[all,extscache]==5.1.0' --extra-index-url https://pypi.nvidia.com
@@ -78,6 +85,42 @@ pip install -e robot_lab/source/robot_lab --no-deps --config-settings editable_m
 `editable_mode=compat` is required: with the default editable install, `import robot_lab`
 resolves to the empty `robot_lab/` directory of this repository instead of the package.
 
+### Ubuntu 26.04 / RTX 5090 compatibility
+
+Isaac Sim 5.1 officially supports Ubuntu 22.04/24.04. On Ubuntu 26.04,
+Isaac Sim's bundled `libfbxsdk.so` expects the legacy **`libxml2.so.2`** ABI,
+while the OS provides a newer libxml2 ABI. Installing `libxml2` with `apt` does
+not resolve this ABI mismatch.
+
+`setup.sh` automatically detects Ubuntu 26.04 and installs the conda-forge
+build `libxml2=2.13.9=h04c0eec_0` in a temporary prefix. It then copies
+`libxml2.so.2` and its required dependencies into Isaac Sim's
+`asset_converter_native_bindings/libs/` directory. System libraries are left
+untouched; do **not** symlink `libxml2.so.16` to `libxml2.so.2`.
+
+This workaround follows the approach documented in
+[Isaac Sim discussion #824](https://github.com/isaac-sim/IsaacSim/discussions/824).
+
+For RTX 5090 / Blackwell, use the **NVIDIA 580-open** driver branch for this
+Isaac Sim 5.1 setup. NVIDIA lists Linux driver **580.65.06** as the tested
+5.1.0 baseline. This repository was successfully run on Ubuntu 26.04 with
+Ubuntu's `nvidia-driver-580-open` package, version `580.178.04`.
+
+The setup script creates an `isaacsim-il4op` launcher that passes:
+
+```text
+--/renderer/activeGpu=0
+--/renderer/multiGpu/enabled=false
+```
+
+Use `isaacsim-il4op --reset-user` for the first launch, then `isaacsim-il4op`
+for subsequent launches.
+
+On Ubuntu 26.04, the ROS 2 bridge may also report that the Ubuntu version is
+unsupported for automatic ROS distribution selection. This is separate from
+the `libxml2` workaround; if ROS 2 is not being used, this warning can be
+ignored.
+
 ### Verify
 ```bash
 python tools/check_environment.py
@@ -101,25 +144,14 @@ The pretrained Anymal-C navigation policies **are** included, so the planning ex
 work right after the installation.
 
 ### Troubleshooting
-- `Could not load PyInstaller's embedded PKG archive ... (/root/miniconda3/_conda)` -> conda was
-  installed as **root** (with `sudo`) and your user cannot read it, or the installer download was
-  truncated. Remove it (`sudo rm -rf /root/miniconda3`), drop any `conda init` block that points
-  there from your `~/.bashrc`, and run `./setup.sh --install-conda` **without sudo**;
-- `conda: command not found` after `--install-conda` -> the batch installer does not touch the
-  shell configuration; the script runs `conda init` for you, so open a new terminal (`exec $SHELL`);
-- `CondaToSNonInteractiveError` (Terms of Service of the Anaconda channels not accepted) ->
-  `setup.sh` creates the environment from `conda-forge` only and is not affected; if another
-  conda command raises it, either accept the terms with `conda tos accept --override-channels
-  --channel https://repo.anaconda.com/pkgs/main` (and the same for `.../pkgs/r`) or create the
-  environment with `-c conda-forge --override-channels` and use `--use-current-env`;
-- `ModuleNotFoundError: pkg_resources` when building `flatdict` -> `flatdict` has no wheel and
-  its `setup.py` imports `pkg_resources`, which setuptools 82 removed; pip builds it in an
-  isolated environment with the newest setuptools, so it has to be built against an older one
-  (`setup.sh` does this automatically):
-  ```bash
-  pip install "setuptools<82" wheel
-  pip install flatdict==4.0.1 --no-build-isolation
-  ```
+- `ModuleNotFoundError: pkg_resources` while installing the IsaacLab extensions ->
+  `pip install "setuptools<82"` and run the step again;
+- `libxml2.so.2: cannot open shared object file` on Ubuntu 26.04 ->
+  re-run `./setup.sh`; the compatibility library is installed automatically.
+  Do **not** symlink `libxml2.so.16` to `libxml2.so.2`;
+- Isaac Sim starts and then segfaults ->
+  check `nvidia-smi` and use the **580-open** driver branch. Launch with
+  `isaacsim-il4op --reset-user`;
 - the training and play scripts import `utils.launcher`, so they must be started from the
   repository root as `python isaaclab_experiments/<script>.py`.
 
