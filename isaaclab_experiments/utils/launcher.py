@@ -14,7 +14,7 @@ from isaaclab.app import AppLauncher
 import logging
 
 # local imports
-from isaaclab_experiments.utils.cli_args import add_rsl_rl_args, update_rsl_rl_cfg
+from .cli_args import add_rsl_rl_args, update_rsl_rl_cfg
 
 
 def str2bool(value):

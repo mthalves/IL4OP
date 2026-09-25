@@ -29,14 +29,7 @@ from isaaclab.utils.io import dump_yaml
 from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper
 
 import isaaclab_tasks  # noqa: F401
-import isaaclab_experiments.anymal_c_planning  # noqa: F401
-import isaaclab_experiments.go1_locomotion  # noqa: F401
-
-# Go2W locomotion tasks depend on robot_lab; skip them when it is not installed
-try:
-    import isaaclab_experiments.go2w_locomotion  # noqa: F401
-except ImportError as error:
-    print(f"[WARN] Go2W tasks unavailable: {error}")
+import isaaclab_experiments  # noqa: F401  (registers the tasks)
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
