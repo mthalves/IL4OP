@@ -5,18 +5,22 @@
 
 # These are intentionally configurable.
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=64G
-#SBATCH --time=2-00:00:00
+#SBATCH --mem=96G
+#SBATCH --time=1-00:00:00
 
-#SBATCH --output=logs/%x-%j.out
-#SBATCH --error=logs/%x-%j.err
+#SBATCH --output=logs/%u-%x-%j.out
+#SBATCH --error=logs/%u-%x-%j.err
 #
 # Train an IL4OP policy on the cluster. Every argument is forwarded to the training
 # script, so the job is submitted from the repository root as:
 #
 #   mkdir -p logs
-#   sbatch tools/slurm/train.sbatch --task IL4OP-Velocity-Rough-Unitree-Go1-v0 \
+#   sbatch --job-name="$USER-<task>" tools/slurm/train.sbatch --task <TASK> \
 #       --headless --num_envs 4096 --max_iterations 20000
+#
+# `tools/slurm/submit.sh` asks for all of this and submits the job for you; the job name
+# carries the user and the task, and the logs are named logs/<user>-<job name>-<id>.out/.err.
+# Both IsaacLab tasks (Isaac-*) and isaaclab_experiments tasks (IL4OP-*) are supported.
 #
 # Environment variables:
 #   IL4OP_PATH          repository root (default: the directory the job was submitted from)
