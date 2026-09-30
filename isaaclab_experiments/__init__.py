@@ -10,6 +10,7 @@ __version__ = "1.0.0"
 from isaaclab_experiments import anymal_c_planning  # noqa: F401
 from isaaclab_experiments import go1_locomotion  # noqa: F401
 from isaaclab_experiments import go1_locomotion_contact_consistency  # noqa: F401
+from isaaclab_experiments import go1_locomotion_contact_framework  # noqa: F401
 
 # the Go2W tasks depend on robot_lab, which is not part of this repository
 try:
