@@ -1,5 +1,10 @@
 # IL4OP  
-[![Python](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org/) [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-green)](https://isaac-sim.github.io/IsaacLab/)
+[![Python](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org/) [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-green)](https://isaac-sim.github.io/IsaacLab/) [![IsaacLab](https://img.shields.io/badge/IsaacLab-2.3.2-green)](https://isaac-sim.github.io/IsaacLab/) [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Ubuntu%20only-orange)](#requirements) [![License](https://img.shields.io/badge/license-GPL--3.0-lightgrey)](LICENSE)
+
+> :penguin: **Linux only.** IL4OP is developed and tested on **Ubuntu** with an NVIDIA GPU, and nowhere else.
+> Isaac Sim itself runs on Windows too, but nothing here has been tried there: `setup.sh`, `tools/slurm/` and the
+> terminal controls of `tools/sim2sim` all assume a POSIX shell. Tested on Ubuntu 22.04 and 26.04; Isaac Sim 5.1
+> also supports 24.04.
 
 IL4OP is a modified and extended version of **IsaacLab** designed to support **online planning under uncertainty** in robotic environments. It adapts IsaacLab's flexibility to advance research in online planning, with ready-to-use components for benchmarking, testing, and experimentation.  
 
@@ -13,6 +18,7 @@ Publicly available to foster research! :sparkles:
 - Support for **online planning under uncertainty**; 
 - Plug-and-play **planning algorithm selection**;
 - Easy experiment configuration and logging (**results + videos**);
+- **Sim-to-sim validation** of trained locomotion policies in MuJoCo ([tools/sim2sim](tools/sim2sim/README.md));
 - Open-source framework to facilitate **implementation, testing, and benchmarking**. 
 
 ---
@@ -20,7 +26,7 @@ Publicly available to foster research! :sparkles:
 ## :gear: Installation
 
 ### Requirements
-- Linux with an NVIDIA GPU. Isaac Sim 5.1 officially supports **Ubuntu 22.04/24.04** and lists Linux driver **580.65.06** as its tested driver version. See the [Isaac Sim 5.1 requirements](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/requirements.html).
+- **Ubuntu Linux** with an NVIDIA GPU; no other platform is tested. Isaac Sim 5.1 officially supports **Ubuntu 22.04/24.04** and lists Linux driver **580.65.06** as its tested driver version. See the [Isaac Sim 5.1 requirements](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/requirements.html).
 - This repository has also been validated on **Ubuntu 26.04 + RTX 5090 + NVIDIA 580-open** using the compatibility workaround below. Ubuntu 26.04 is **not officially supported** by Isaac Sim 5.1.
 - [Miniconda](https://docs.conda.io/projects/miniconda/) (or any Python **3.11** environment) — `setup.sh` checks it and can install it with `--install-conda`;
 - ~40 GB of free disk space for Isaac Sim and its asset cache.
@@ -138,6 +144,7 @@ python isaaclab_experiments/train_rsl_rl.py --task IL4OP-Velocity-Flat-Unitree-G
 |---|---|
 | `logs/` | Training runs and checkpoints are ignored by git; copy them manually to evaluate or resume a policy |
 | `robot_lab/` | The Go2W tasks stay unavailable until it is installed (the scripts warn and continue) |
+| `unitree_ros/`, `tools/sim2sim/models/` | The sim-to-sim scenes are built from the robot descriptions on first use, by `tools/sim2sim/build_models.py` |
 | `outputs/` | Hydra run directories, not needed |
 
 The pretrained Anymal-C navigation policies **are** included, so the planning experiments
@@ -215,54 +222,49 @@ work right after the installation.
 - We let the necessary code for plotting and analysing the results ready and available in the `logs` directory. 
 - Easy to run, easy to analyse. :kissing_smiling_eyes:
 
-### 4. (Optional) Train the low-level navigation policy:
-- A pretrained policy is shipped in `isaaclab_experiments/policies/`. To retrain it with RSL-RL or skrl:
+### 4. (Optional) Retrain the navigation policy:
+- The planning tasks **evaluate** planning algorithms; they do not train anything. The high-level
+  navigation policy they drive ships with the repository
+  (`isaaclab_experiments/policies/anymal_c_navigation.jit.pt`) and the low-level locomotion policy comes
+  from the Isaac Lab asset server, so the planning experiments run right after the installation.
+- That navigation policy is trained with **Isaac Lab's own navigation task**, then converted to the
+  TorchScript file the planning environment loads:
    ```bash
-   python isaaclab_experiments/train_rsl_rl.py --task Anymal-C-Planning-v0 --headless
-   python isaaclab_experiments/train_skrl.py   --task Anymal-C-Planning-v0 --headless
+   python isaaclab_experiments/train_skrl.py --task Isaac-Navigation-Flat-Anymal-C-v0 --headless
+   python isaaclab_experiments/policies/convert_pt2jit.py --headless \
+       --task Isaac-Navigation-Flat-Anymal-C-v0 \
+       --checkpoint logs/skrl/<run>/checkpoints/best_agent.pt
    ```
-- Checkpoints and TensorBoard logs are written to `logs/rsl_rl/` and `logs/skrl/`.
-- To play and evaluate a trained policy, use the matching play script. It loads the latest run of the
-  task (or `--checkpoint <file>`), runs the policy and reports episode statistics; `--max_steps` bounds the
-  evaluation, `--video` records a rollout and `--export` (RSL-RL) writes JIT/ONNX policies next to the checkpoint:
-   ```bash
-   python isaaclab_experiments/play_rsl_rl.py --task Anymal-C-Planning-v0 --num_envs 32 --max_steps 1100 --headless
-   python isaaclab_experiments/play_skrl.py   --task Anymal-C-Planning-v0 --checkpoint <path/to/agent.pt>
-   ```
+- See **[isaaclab_experiments/README.md](isaaclab_experiments/README.md)** for where the policy goes and
+  what it has to match.
 
-### 5. (Optional) Train the Unitree Go1 locomotion policies:
-- `isaaclab_experiments/go1_locomotion/` is a standalone copy of IsaacLab's Go1 velocity task (base
-  configuration, MDP terms and agents), so it can be modified without touching the vendored IsaacLab:
-
-  | Task | Description |
-  |---|---|
-  | `IL4OP-Velocity-Flat-Unitree-Go1-v0` (`-Play-v0`) | flat terrain |
-  | `IL4OP-Velocity-Rough-Unitree-Go1-v0` (`-Play-v0`) | rough terrain with curriculum |
-
+### 5. (Optional) Train a locomotion policy:
+- The same scripts train the legged-locomotion tasks this repository adds for the **Unitree Go1** (plain,
+  and two variants that use a learned contact estimator) and the **Unitree Go2W** (including a commanded
+  base height). They are listed, with what each one changes, in
+  **[isaaclab_experiments/README.md](isaaclab_experiments/README.md)**:
    ```bash
    python isaaclab_experiments/train_rsl_rl.py --task IL4OP-Velocity-Rough-Unitree-Go1-v0 --headless
+   python isaaclab_experiments/play_rsl_rl.py  --task IL4OP-Velocity-Rough-Unitree-Go1-v0 --export
    ```
+- The Go2W tasks additionally need [robot_lab](https://github.com/fan-ziqi/robot_lab) (`v2.3.2`); without
+  it they are not registered and the scripts carry on without them.
 
-### 6. (Optional) Train the Unitree Go2W locomotion policies:
-- These tasks build on [robot_lab](https://github.com/fan-ziqi/robot_lab) (`v2.3.2`), which provides the Go2W
-  robot description and the base velocity-tracking task. Install it next to the repository:
-   ```bash
-   git clone --branch v2.3.2 https://github.com/fan-ziqi/robot_lab.git
-   pip install -e robot_lab/source/robot_lab --config-settings editable_mode=compat
-   ```
-- Three variants are registered in `isaaclab_experiments/go2w_locomotion/`:
-
-  | Task | Description |
-  |---|---|
-  | `IL4OP-Velocity-Flat-Unitree-Go2W-v0` | flat terrain |
-  | `IL4OP-Velocity-Rough-Unitree-Go2W-v0` | rough terrain with curriculum |
-  | `IL4OP-Velocity-Flat-Z-Unitree-Go2W-v0` | flat terrain with a **commanded base height** (0.25 - 0.40 m) |
+### 6. (Optional) Validate a trained policy sim-to-sim:
+- Before a locomotion policy goes anywhere near the hardware, run it in a **different simulator**:
+  `tools/sim2sim/` plays an exported policy in MuJoCo, on a model built from the robot's own URDF,
+  through the sequence a real deployment follows (folded on the floor, fixed-gain stand-up, then the
+  legs handed over). The robot can also be teleoperated, and walked without any policy at all.
 
    ```bash
-   python isaaclab_experiments/train_rsl_rl.py --task IL4OP-Velocity-Flat-Z-Unitree-Go2W-v0 --headless
+   pip install "mujoco>=3.1"
+   git clone https://github.com/unitreerobotics/unitree_ros.git ~/unitree_ros   # Go1 description
+   python tools/sim2sim/build_models.py          # URDFs -> MuJoCo scenes
+   python tools/sim2sim/play.py --robot go1 --teleop \
+       --policy logs/rsl_rl/unitree_go1_rough/<run>/exported/policy.pt
    ```
-- The `Flat-Z` variant adds a `base_height` command to the observations and the reward terms
-  `base_height_penalty`, `go2w_joint_mirror` and `wheel_position_penalty` (see `go2w_locomotion/mdp/`).
+- See **[tools/sim2sim/README.md](tools/sim2sim/README.md)** for the exported-policy requirement,
+  the keyboard controls, and what the results do and do not tell you.
 
 
 ## :computer: In development & Future directions
@@ -271,6 +273,37 @@ work right after the installation.
 - [x] Support planning algorithms with continuous world and decision models.
 - [ ] Extension of the single agent scenario to multi-agent problems (toilored to centralized and decentralized approaches).
 - [ ] Extension of IL4OP to support dynamic world models applications.
+
+## :handshake: Acknowledgements
+
+IL4OP does not implement or propose a whole new simulator: it unifies and extends works that others published, and it would not
+exist without it. Please respect the licence of each project and cite it alongside IL4OP.
+
+| Project | How IL4OP uses it | Licence |
+|---|---|---|
+| [**Isaac Lab**](https://github.com/isaac-sim/IsaacLab) 2.3.2 (NVIDIA, ETH Zurich) | vendored in `IsaacLab/` and extended: the planning environments, the locomotion tasks and the training/play scripts are all built on its manager-based environments | BSD-3-Clause |
+| [**Isaac Sim**](https://developer.nvidia.com/isaac/sim) 5.1.0 (NVIDIA Omniverse) | the simulator and the renderer underneath Isaac Lab, installed from pip and covered by its own NVIDIA licence | NVIDIA Omniverse licence |
+| [**robot_lab**](https://github.com/fan-ziqi/robot_lab) 2.3.2 (Ziqi Fan) | the Go2W description and the wheeled-legged velocity task that `isaaclab_experiments/go2w_locomotion/` builds on | Apache-2.0 |
+| [**unitree_ros**](https://github.com/unitreerobotics/unitree_ros) (Unitree Robotics) | the Go1 description and the fixed-gain posture control that `tools/sim2sim/` reproduces | BSD-3-Clause |
+| [**MuJoCo**](https://github.com/google-deepmind/mujoco) (Google DeepMind) | the second simulator the policies are validated in | Apache-2.0 |
+| [**RSL-RL**](https://github.com/leggedrobotics/rsl_rl) (ETH Zurich) and [**skrl**](https://github.com/Toni-SM/skrl) (Antonio Serrano-Muñoz) | the PPO implementations the policies are trained with | BSD-3-Clause / MIT |
+
+```bibtex
+@article{mittal2025isaaclab,
+  title   = {Isaac Lab: A GPU-Accelerated Simulation Framework for Multi-Modal Robot Learning},
+  author  = {Mittal, Mayank and Roth, Pascal and Tigue, James and Richard, Antoine and others},
+  journal = {arXiv preprint arXiv:2511.04831},
+  year    = {2025},
+  url     = {https://arxiv.org/abs/2511.04831}
+}
+
+@software{fan-ziqi2024robot_lab,
+  author = {Ziqi Fan},
+  title  = {robot_lab: RL Extension Library for Robots, Based on IsaacLab.},
+  url    = {https://github.com/fan-ziqi/robot_lab},
+  year   = {2024}
+}
+```
 
 ## :book: Citation
 

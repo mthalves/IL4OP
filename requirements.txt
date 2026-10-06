@@ -1,13 +1,13 @@
 # Project dependencies on top of IsaacSim 5.1.0 / IsaacLab 2.3.2.
 # torch, numpy and gymnasium are provided by the IsaacLab installation.
 
-# Reinforcement learning (navigation policy training)
+# Reinforcement learning (navigation and locomotion policy training)
 rsl-rl-lib==3.1.2
 skrl==2.1.0
 
 # Result analysis (logs/)
 matplotlib==3.10.3
-pandas==3.0.1
+pandas==3.0.5
 scipy==1.15.3
 
 # Experiment launcher (python -m app)
@@ -15,3 +15,6 @@ PySide6==6.11.1
 
 # Utilities
 packaging>=23.0
+
+# Sim-to-sim validation (tools/sim2sim) is optional and installed on its own:
+#   pip install "mujoco>=3.1"
