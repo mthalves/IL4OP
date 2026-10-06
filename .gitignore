@@ -222,3 +222,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# MuJoCo scenes built from the URDFs by tools/sim2sim/build_models.py; they carry the
+# absolute mesh paths of the machine that built them, so each clone builds its own
+tools/sim2sim/models/
