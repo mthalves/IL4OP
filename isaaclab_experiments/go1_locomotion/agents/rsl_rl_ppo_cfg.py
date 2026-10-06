@@ -14,6 +14,8 @@ class UnitreeGo1RoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 20000
     save_interval = 50
+    # the policy sees what the robot can measure, the critic also the true base velocity
+    obs_groups = {"policy": ["policy"], "critic": ["policy", "privileged"]}
     experiment_name = "unitree_go1_rough"
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,

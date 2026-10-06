@@ -77,6 +77,20 @@ and a tip-over termination.
 | `IL4OP-Velocity-Flat-Unitree-Go1-v0` | flat terrain |
 | `IL4OP-Velocity-Rough-Unitree-Go1-v0` | rough terrain with curriculum |
 
+It is also set up to be deployed rather than only trained, which is what the four settings
+at the top of `rough_env_cfg.py` and `velocity_env_cfg.py` are about:
+
+| | |
+|---|---|
+| `STAND_POSE`, `STAND_HEIGHT` | the policy is trained around the pose the robot is stood up in -- the thigh and calf angles of the built-in controller, 0.329 m of ride height -- and a reward holds that height while it walks, so the posture does not change hands at the hand-over |
+| `OBSERVE_BASE_LIN_VEL` | off: a Go1 cannot measure its linear velocity, so the policy reads the 45 numbers it does have and the critic is given the true velocity instead (`obs_groups` in the agent config) |
+| `ACTION_DELAY_STEPS` | the commanded targets reach the motors up to 10 ms late, drawn per robot, as they do over a real bus |
+| `USE_SENSORS` | off: no height scanner, so the policy is blind to the terrain ahead, as the robot is |
+
+Standing still is treated as a posture to hold rather than an absence of walking: the feet
+all stay on the ground and the joints return to the nominal pose when there is nothing to
+do, so the robot can be handed back to the controller from wherever it stops.
+
 ```bash
 python isaaclab_experiments/train_rsl_rl.py --task IL4OP-Velocity-Rough-Unitree-Go1-v0 --headless
 ```

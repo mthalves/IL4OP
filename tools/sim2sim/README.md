@@ -66,8 +66,14 @@ python isaaclab_experiments/play_rsl_rl.py --task IL4OP-Velocity-Rough-Unitree-G
 # -> logs/rsl_rl/unitree_go1_rough/<run>/exported/policy.pt
 ```
 
-Pass `--obs_dim` when the policy is not the plain 48-input one: `52` for the Go1
-contact-framework policies, `57` / `60` / `61` for Go2W flat / rough / flat-z.
+Pass `--obs_dim` for anything but the default 45: `49` for the Go1 contact-framework
+policies, `48` / `52` for Go1 policies trained while the base linear velocity was still in
+the observation, and `57` / `60` / `61` for Go2W flat / rough / flat-z.
+
+A policy also has to be run with the nominal pose it was trained around, because that pose
+is the zero of both its action and the joint positions it reads. `--nominal legacy` is the
+Isaac Lab default pose that the Go1 policies trained before `STAND_POSE` used; without it
+they stand 42 mm too low and the comparison means nothing.
 
 Nothing else is needed: the harness runs on the `torch` and `numpy` the project already has, and
 needs a display only for the viewer. The Go1 contact-framework policies also read `cnet.py` and
@@ -134,6 +140,26 @@ on flat ground: Go1 tracks 0.2-0.6 m/s forwards, 0.3 m/s sideways and 0.8 rad/s 
 0.01 m/s and turns at about 0.3 rad/s before the wheels run out of torque. Neither has any
 force control and neither looks at the ground, so this is a flat-floor gait at moderate speed
 and nothing more.
+
+## Towards the real robot
+
+Sim-to-sim is the step before the robot, not the last one. What this harness has settled:
+
+- the policy runs at the rate, the gains and the torque limits the robot has, from the pose
+  the controller stands it up in, and the hand-over in both directions is tested;
+- the observation it reads is one the robot can produce -- 45 numbers, none of which is the
+  base linear velocity a Go1 cannot measure;
+- the peak torque a policy asks for is measured, and no policy here comes near the limits.
+
+What is still missing before a policy drives the hardware:
+
+| | |
+|---|---|
+| the low-level program | a Go1 speaks the legacy `unitree_legged_sdk` over UDP, not the DDS of `unitree_sdk2`, so the deployment side has to be written: read the 1 kHz state, build the observation, run the policy at 50 Hz, send position targets with kp 20 / kd 0.5 |
+| the joint order | Isaac Lab orders the joints by type (all hips, all thighs, all calves), the SDK by leg; getting this wrong is the classic way to break a robot |
+| calibration | the encoder zero of a real Go1 is not the zero of the URDF, and an offset of a few degrees is a different posture |
+| safety | a torque and velocity clamp, a tip-over cut-out and a damping fallback on the deployment side, not in the policy |
+| the gap that is left | flat floor only here, no estimator in the loop, and the actuator network stands in for the motors |
 
 ## What it checks, and what it does not
 

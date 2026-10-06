@@ -13,7 +13,7 @@ from .contact import ContactNet
 from .specs import ROBOTS
 
 class Sim2Sim:
-    def __init__(self, robot: str, policy_path: Path | None, obs_dim: int):
+    def __init__(self, robot: str, policy_path: Path | None, obs_dim: int, nominal: str = "current"):
         self.cfg = ROBOTS[robot]
         self.model = mujoco.MjModel.from_xml_path(str(self.cfg["scene"]))
         self.data = mujoco.MjData(self.model)
@@ -26,7 +26,13 @@ class Sim2Sim:
         self.qpos_idx = np.array([self.model.jnt_qposadr[self._joint(n)] for n in names])
         self.qvel_idx = np.array([self.model.jnt_dofadr[self._joint(n)] for n in names])
         self.act_idx = np.array([mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, n) for n in names])
-        self.default = np.array([self.cfg["default"][n] for n in names])
+        # the pose a policy was trained around is the zero of its action and of the joint
+        # positions it reads, so it has to be the one it is run with
+        pose = self.cfg["default"] if nominal == "current" else self.cfg.get(f"{nominal}_default")
+        if pose is None:
+            raise SystemExit(f"'{robot}' has no '{nominal}' nominal pose")
+        self.nominal = nominal
+        self.default = np.array([pose[n] for n in names])
         self.is_wheel = np.array([n in self.cfg["wheels"] for n in names])
 
         def per_joint(value):

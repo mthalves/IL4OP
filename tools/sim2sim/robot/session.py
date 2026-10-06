@@ -60,7 +60,13 @@ def teleoperate(sim: "Sim2Sim", height: float, mode: str = "sticky", keys: str =
                 teleop.changed = False
                 last_banner = time.time()
 
-            teleop.posture_mode = controller.state == controller.STAND
+            # the keys move the trunk only while the controller is holding the robot for
+            # its own sake; once the legs are being handed over they belong to whoever is
+            # about to drive them, and a posture command would undo the squaring up
+            handing_over = controller.pending is not None
+            teleop.posture_mode = controller.state == controller.STAND and not handing_over
+            if handing_over:
+                teleop.posture[:] = 0.0
             controller.posture_target = teleop.posture
             sim.height_command = teleop.height
             message = controller.update(teleop.command)

@@ -6,6 +6,7 @@
 # Copied from IsaacLab 2.3.2 (isaaclab_tasks/manager_based/locomotion/velocity/config/go1/rough_env_cfg.py) for local modification.
 import math
 
+from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
@@ -27,6 +28,28 @@ from isaaclab_assets.robots.unitree import UNITREE_GO1_CFG  # isort: skip
 USE_SENSORS = False  # set to True to use height scan sensor for rough terrain locomotion
 
 FEET = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+
+#: The pose the policy is trained around, which is also the pose the robot is handed over
+#: in. The thigh and calf angles are those the built-in Unitree controller stands at
+#: (``unitree_ros``, body.cpp: 0.67 and -1.3), so a policy that holds its nominal pose
+#: holds the posture the robot was stood up in; the abduction joints keep the 0.1 rad of
+#: the Isaac Lab default, which widens the stance from 0.25 m to 0.32 m and costs only
+#: 10 mm of ride height. Changing this changes the action offset and ``joint_pos_rel``, so
+#: a policy trained with it must be run with it: tools/sim2sim has the same pose.
+STAND_POSE = {
+    ".*L_hip_joint": 0.1,
+    ".*R_hip_joint": -0.1,
+    ".*_thigh_joint": 0.67,
+    ".*_calf_joint": -1.3,
+}
+#: Height of the base above the feet at ``STAND_POSE``, measured on the model (metres).
+STAND_HEIGHT = 0.329
+
+#: Longest lag between a decision and the motors acting on it, in physics steps of 5 ms.
+#: The robot needs a few milliseconds to pack the command, put it on the bus and have the
+#: motor controllers pick it up; a policy trained at zero latency reacts faster than the
+#: robot can. Set to 0 to command the joints the instant the policy decides.
+ACTION_DELAY_STEPS = 2
 # ContactNet orders the feet (LF, RF, LH, RH)
 FEET_CNET = list(CNET_FEET)
 
@@ -51,7 +74,7 @@ class UnitreeGo1RewardsCfg(RewardsCfg):
         weight=-0.2,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*_hip_joint")},
     )
-    # lower bound on the stance width (nominal stance: 0.32 m front, 0.36 m rear)
+    # lower bound on the stance width (the nominal stance of STAND_POSE is 0.32 m)
     feet_stance_width = RewTerm(
         func=mdp.feet_stance_width,
         weight=-2.0,
@@ -73,6 +96,33 @@ class UnitreeGo1RewardsCfg(RewardsCfg):
             "use_probabilities": True,
             "every_n_steps": 1,
         },
+    )
+
+    # -- posture, so that the policy is deployable from and back to the standing pose
+    # hold the ride height the robot was stood up in, measured from the feet on the ground
+    base_height = RewTerm(
+        func=mdp.base_height_above_feet,
+        weight=-50.0,
+        params={
+            "target_height": STAND_HEIGHT,
+            "asset_cfg": SceneEntityCfg("robot", body_names=FEET, preserve_order=True),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=FEET, preserve_order=True),
+        },
+    )
+    # stand on four feet, not three: a lifted leg carries nothing and recovers nothing
+    feet_airborne_when_still = RewTerm(
+        func=mdp.feet_airborne_when_still,
+        weight=-0.25,
+        params={
+            "command_name": "base_velocity",
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=FEET, preserve_order=True),
+        },
+    )
+    # and come back to the nominal pose when there is nothing to do
+    stand_still_posture = RewTerm(
+        func=mdp.stand_still_joint_deviation_l1,
+        weight=-0.5,
+        params={"command_name": "base_velocity", "asset_cfg": SceneEntityCfg("robot")},
     )
 
     # -- hardware safety and motor stress
@@ -119,6 +169,15 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # reduce action scale
         self.actions.joint_pos.scale = 0.25
+        if ACTION_DELAY_STEPS:
+            # the same action term, reaching the motors as late as it does on the robot
+            self.actions.joint_pos = mdp.DelayedJointPositionActionCfg(
+                asset_name="robot",
+                joint_names=[".*"],
+                scale=self.actions.joint_pos.scale,
+                use_default_offset=True,
+                max_delay=ACTION_DELAY_STEPS,
+            )
 
         # event
         self.events.add_base_mass.params["mass_distribution_params"] = (-1.0, 3.0)
@@ -137,6 +196,9 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             },
         }
 
+        # the policy is trained around the pose the robot is handed over in
+        self.scene.robot.init_state.joint_pos = dict(STAND_POSE)
+
         # -- domain randomization (sim-to-real)
         # ground friction varies widely on the real robot; a single value makes the
         # policy rely on the contact behaviour of this simulation only
@@ -147,6 +209,42 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.base_com.params["com_range"] = {"x": (-0.03, 0.03), "y": (-0.02, 0.02), "z": (-0.02, 0.02)}
         # recover from pushes instead of only from the nominal state
         self.events.push_robot.params["velocity_range"] = {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}
+        # The actuator network carries the motor, but not what sits between it and the
+        # link: the rotor turns with the joint through the gearbox, and the joint has
+        # friction in it. The USD says neither, so both are set here, and varied because no
+        # two robots are the same. The armature is the rotor inertia of the motor
+        # (1.47e-4 kg m^2) seen through the reduction, 6.33 at the hip and the thigh and
+        # 6.33 x 1.55 at the knee, where a belt stage follows the gearbox.
+        self.events.joint_friction = EventTerm(
+            func=mdp.randomize_joint_parameters,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+                "friction_distribution_params": (0.0, 0.04),
+                "operation": "abs",
+                "distribution": "uniform",
+            },
+        )
+        self.events.joint_armature = EventTerm(
+            func=mdp.randomize_joint_parameters,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_joint", ".*_thigh_joint"]),
+                "armature_distribution_params": (0.0047, 0.0071),
+                "operation": "abs",
+                "distribution": "uniform",
+            },
+        )
+        self.events.knee_armature = EventTerm(
+            func=mdp.randomize_joint_parameters,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=".*_calf_joint"),
+                "armature_distribution_params": (0.0113, 0.0169),
+                "operation": "abs",
+                "distribution": "uniform",
+            },
+        )
 
         # rewards
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = ".*_foot"

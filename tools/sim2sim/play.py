@@ -39,7 +39,10 @@ def main():
     parser.add_argument("--robot", default="go1", choices=sorted(ROBOTS))
     parser.add_argument("--policy", type=Path,
                         help="exported policy.pt; without it only the Unitree controller runs")
-    parser.add_argument("--obs_dim", type=int, default=48, help="input size of the policy")
+    parser.add_argument("--obs_dim", type=int, default=45, help="input size of the policy")
+    parser.add_argument("--nominal", default="current", choices=("current", "legacy"),
+                        help="the pose the policy was trained around; 'legacy' is the Isaac Lab"
+                             " default, used by the Go1 policies trained before STAND_POSE")
     parser.add_argument("--height", type=float, default=0.33,
                         help="base height command of the Go2W flat-z policies (0.25 - 0.40)")
     parser.add_argument("--command", type=float, nargs=3, default=[1.0, 0.0, 0.0],
@@ -60,7 +63,7 @@ def main():
     if args.policy is None and not args.teleop:
         parser.error("--policy is needed for a scripted run; --teleop works without one")
 
-    sim = Sim2Sim(args.robot, args.policy, args.obs_dim)
+    sim = Sim2Sim(args.robot, args.policy, args.obs_dim, args.nominal)
     sim.height_command = args.height
     sim.reset()
 

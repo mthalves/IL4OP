@@ -83,6 +83,16 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
 
+#: The base linear velocity is in the observation of the Isaac Lab task, and a Go1 cannot
+#: measure it: it has no sensor for it, and what an estimator built on the IMU and the legs
+#: returns drifts and is worst exactly when the robot is being pushed around. A policy that
+#: reads it therefore learns on something deployment cannot supply. With this off the
+#: observation is the 45 numbers the robot does have -- angular velocity, gravity
+#: direction, command, joint positions and velocities, previous action -- which is what
+#: Unitree's own deployments feed their policies. Turn it on only to train against a
+#: velocity estimator that will also be there on the robot.
+OBSERVE_BASE_LIN_VEL = False
+
 ##
 # MDP settings
 ##
@@ -122,6 +132,7 @@ class ObservationsCfg:
         """Observations for policy group."""
 
         # observation terms (order preserved)
+        # dropped unless OBSERVE_BASE_LIN_VEL: the robot cannot measure it (see above)
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1), clip=(-100.0, 100.0))
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2), clip=(-100.0, 100.0))
         projected_gravity = ObsTerm(
@@ -143,9 +154,28 @@ class ObservationsCfg:
         def __post_init__(self):
             self.enable_corruption = True
             self.concatenate_terms = True
+            if not OBSERVE_BASE_LIN_VEL:
+                self.base_lin_vel = None
+
+    @configclass
+    class PrivilegedCfg(ObsGroup):
+        """What the critic may see on top of the policy observation.
+
+        The critic only ever runs during training, so it can be told things the robot has
+        no way of measuring. Keeping the true base velocity here instead of in the policy
+        observation leaves the value function as well informed as before while the policy
+        stays deployable.
+        """
+
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel)
+
+        def __post_init__(self):
+            self.enable_corruption = False      # the critic is not deployed, so no noise
+            self.concatenate_terms = True
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
+    privileged: PrivilegedCfg = PrivilegedCfg()
 
 
 @configclass

@@ -35,6 +35,15 @@ GO2W_JOINTS = [
     "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
     "FR_foot_joint", "FL_foot_joint", "RR_foot_joint", "RL_foot_joint",
 ]
+#: The pose the Go1 policies are trained around, which is also their action offset and the
+#: zero of ``joint_pos`` in their observation: the thigh and calf angles the built-in
+#: controller stands at, with the abduction of the Isaac Lab default for a wider stance.
+#: It is ``STAND_POSE`` in isaaclab_experiments/go1_locomotion*/rough_env_cfg.py, and a
+#: policy has to be run with the pose it was trained with -- ``--nominal legacy`` is the
+#: Isaac Lab default that the policies trained before that change used.
+GO1_STAND = {j: (0.1 if j.startswith(("FL", "RL")) else -0.1) if "hip" in j
+             else 0.67 if "thigh" in j else -1.3 for j in GO1_JOINTS}
+
 GO2W_WHEELS = GO2W_JOINTS[12:]
 GO2W_DEFAULT = {j: (0.0 if "hip" in j or "foot" in j else 0.8 if "thigh" in j else -1.5) for j in GO2W_JOINTS}
 
@@ -42,7 +51,8 @@ ROBOTS = {
     "go1": {
         "scene": MODELS / "go1_scene.xml",
         "joints": GO1_JOINTS,
-        "default": GO1_DEFAULT,
+        "default": GO1_STAND,
+        "legacy_default": GO1_DEFAULT,   # the Isaac Lab pose, for policies trained on it
         "action_scale": 0.25,          # actions.joint_pos.scale
         "base_body": "trunk",
         # Isaac Lab drives the Go1 through a learned actuator network; MuJoCo gets the PD
@@ -53,9 +63,19 @@ ROBOTS = {
         "fall_height": 0.18,
         "spawn_height": 0.42,
         "wheels": [],
-        "obs": [("base_lin_vel", 1.0), ("base_ang_vel", 1.0), ("projected_gravity", 1.0),
-                ("velocity_commands", 1.0), ("joint_pos", 1.0), ("joint_vel", 1.0), ("actions", 1.0)],
-        # 52 inputs: the contact-framework policy also sees the ContactNet estimate
+        # 45 inputs: what the robot can measure, which is what the policies are trained on
+        # now; the base linear velocity it cannot measure is left to the critic
+        "obs": [("base_ang_vel", 1.0), ("projected_gravity", 1.0), ("velocity_commands", 1.0),
+                ("joint_pos", 1.0), ("joint_vel", 1.0), ("actions", 1.0)],
+        # 49 inputs: the contact-framework policy also sees the ContactNet estimate
+        "obs_49": [("base_ang_vel", 1.0), ("projected_gravity", 1.0), ("velocity_commands", 1.0),
+                   ("joint_pos", 1.0), ("joint_vel", 1.0), ("contact_probabilities", 1.0),
+                   ("actions", 1.0)],
+        # 48 and 52 inputs: the same, for the policies trained while the base linear
+        # velocity was still in the observation
+        "obs_48": [("base_lin_vel", 1.0), ("base_ang_vel", 1.0), ("projected_gravity", 1.0),
+                   ("velocity_commands", 1.0), ("joint_pos", 1.0), ("joint_vel", 1.0),
+                   ("actions", 1.0)],
         "obs_52": [("base_lin_vel", 1.0), ("base_ang_vel", 1.0), ("projected_gravity", 1.0),
                    ("velocity_commands", 1.0), ("joint_pos", 1.0), ("joint_vel", 1.0),
                    ("contact_probabilities", 1.0), ("actions", 1.0)],

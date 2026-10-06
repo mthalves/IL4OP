@@ -112,12 +112,69 @@ def track_ang_vel_z_world_exp(
 
 
 def stand_still_joint_deviation_l1(
-    env, command_name: str, command_threshold: float = 0.06, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    env, command_name: str, command_threshold: float = 0.1, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """Penalize offsets from the default joint positions when the command is very small."""
+    """Penalize offsets from the default joint positions when the robot is asked to stand still.
+
+    The turn command counts towards standing still as much as the travel commands do: a
+    robot asked to turn in place has to move its legs, and only one asked for nothing at
+    all should be holding its nominal pose.
+    """
     command = env.command_manager.get_command(command_name)
-    # Penalize motion when command is nearly zero.
-    return mdp.joint_deviation_l1(env, asset_cfg) * (torch.norm(command[:, :2], dim=1) < command_threshold)
+    return mdp.joint_deviation_l1(env, asset_cfg) * (torch.norm(command[:, :3], dim=1) < command_threshold)
+
+
+def base_height_above_feet(
+    env: ManagerBasedRLEnv,
+    target_height: float,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 1.0,
+) -> torch.Tensor:
+    """Squared error between the ride height of the base and its target.
+
+    The height is measured from the feet that are on the ground, not from the world, so
+    the term means the same thing on a slope or a step as on flat ground and needs no
+    height scanner. With no foot down there is no ground to be above and the term is zero.
+
+    Holding the ride height is what keeps a trained policy at the posture the robot was
+    stood up in, instead of settling into a crouch of its own that the controller then has
+    to undo when it takes the legs back.
+
+    ``asset_cfg.body_names`` and ``sensor_cfg.body_names`` must list the same feet.
+    """
+    asset = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0]
+    down = forces > threshold
+
+    feet_z = asset.data.body_link_pos_w[:, asset_cfg.body_ids, 2]
+    height = asset.data.root_link_pos_w[:, 2].unsqueeze(1) - feet_z
+    standing_on = down.sum(dim=1)
+    ride_height = (height * down).sum(dim=1) / standing_on.clamp(min=1)
+    return torch.square(ride_height - target_height) * (standing_on > 0)
+
+
+def feet_airborne_when_still(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 1.0,
+    command_threshold: float = 0.1,
+) -> torch.Tensor:
+    """Penalize every foot held off the ground while the robot is asked to stand still.
+
+    Once a velocity policy no longer has to walk, nothing in the task asks it to put the
+    last foot down, and a policy that stands on three legs is not one to hand to a real
+    robot: the lifted leg carries no weight, so a push in the wrong direction has nothing
+    to recover against. Counting the airborne feet is only done at a standstill, where
+    every foot should be loaded.
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0]
+    airborne = (forces <= threshold).float().sum(dim=1)
+    command = env.command_manager.get_command(command_name)
+    return airborne * (torch.norm(command[:, :3], dim=1) < command_threshold)
 
 
 def feet_stance_width(env, asset_cfg: SceneEntityCfg, min_distance: float) -> torch.Tensor:

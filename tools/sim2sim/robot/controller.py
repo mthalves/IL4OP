@@ -40,7 +40,7 @@ class Controller:
     def __init__(self, sim: "Sim2Sim"):
         self.sim = sim
         self.state = self.FOLDED
-        self.standing = np.array([sim.cfg["default"][n] for n in sim.cfg["joints"]])
+        self.standing = sim.default.copy()      # the nominal pose of the policy
         self.folded = np.array([sim.cfg["folded"][n] for n in sim.cfg["joints"]])
         self.poses = {
             "standing": self.standing,
@@ -54,6 +54,10 @@ class Controller:
         self.posture_target = np.zeros(6)
         self.posture = np.zeros(6)
         self.speed = 1.0            # how much of the driving range the keyboard may use
+        #: where the legs are brought before the one that is about to drive them takes
+        #: over: a policy to its own nominal pose, which is the zero of its action and of
+        #: its joint observation, and the gait to the pose it walks around
+        self.handover = {self.POLICY: "standing", self.WALK: "fix_stand"}
         self.legs = Legs(sim, self.poses["fix_stand"])
         self.gait = locomotion(self.legs)
         self.ik_pose = self.poses["fix_stand"].copy()   # warm start of the leg solver
@@ -98,12 +102,11 @@ class Controller:
         trained = np.array(self.sim.cfg["command_limits"])
         return tuple(np.minimum(np.array(self.sim.cfg["drive_limits"]) * self.speed, trained))
 
-    @property
-    def squared_up(self) -> bool:
-        """True when the robot holds the standing pose the policy was trained around."""
+    def squared_up(self, state: str) -> bool:
+        """True when the robot already holds the pose ``state`` wants to start from."""
         if np.any(np.abs(self.posture) > self.POSTURE_NEUTRAL):
             return False
-        error = self.sim.data.qpos[self.sim.qpos_idx] - self.poses["fix_stand"]
+        error = self.sim.data.qpos[self.sim.qpos_idx] - self.poses[self.handover[state]]
         return bool(np.all(np.abs(error[~self.sim.is_wheel]) < self.HANDOVER_TOLERANCE))
 
     def request(self, state: str) -> str:
@@ -113,18 +116,18 @@ class Controller:
             return "no policy was loaded: pass --policy to hand the legs over"
         if state in self.DRIVEN and not self.ready_to_walk:
             return "stand up first (walking starts from a standing robot)"
-        if state in self.DRIVEN and not self.squared_up:
-            # the policy was trained around the standing pose: bring the trunk back to it
-            # before handing the legs over, instead of starting it from a leaning robot
+        if state in self.DRIVEN and not self.squared_up(state):
+            # bring the legs to the pose whoever is about to drive them starts from,
+            # instead of handing them a leaning robot or somebody else's posture
             self.posture_target = np.zeros(6)
             self.posture = np.zeros(6)
             self.ramp_from = self.sim.data.qpos[self.sim.qpos_idx].copy()
             self.progress = 0.0
             self.waypoint = 0
-            self.waypoints = [("fix_stand", self.HANDOVER_TIME)]
+            self.waypoints = [(self.handover[state], self.HANDOVER_TIME)]
             self.pending = state
             self.state = self.STAND
-            return f"squaring up to the standing pose, then {state} takes over"
+            return f"squaring up to the {self.handover[state]} pose, then {state} takes over"
         if state in (self.STAND, self.SIT):
             self.ramp_from = self.sim.data.qpos[self.sim.qpos_idx].copy()
             self.progress = 0.0
@@ -165,6 +168,8 @@ class Controller:
         elif self.state in (self.STAND, self.SIT):
             name, duration = self.waypoints[self.waypoint]
             self.progress = min(1.0, self.progress + self.dt / duration)
+            # the posture keys act on the pose the controller stands at; the other poses
+            # are reached as they are
             goal = self.stand_pose() if name == "fix_stand" else self.poses[name]
             self.sim.hold(self.ramp_from + (goal - self.ramp_from) * self.progress,
                           self.sim.stand_kp, self.sim.stand_kd)
