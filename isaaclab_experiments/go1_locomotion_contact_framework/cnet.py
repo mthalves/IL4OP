@@ -18,9 +18,8 @@ Interface:
 * output ``(N, 4)`` - soft contact probability per foot, ordered (LF, RF, LH, RH),
   obtained by marginalizing the 16-class head over the states in which a foot touches.
 
-The window is expressed in environment steps, which also fixes the rate the network sees
-(the published model was trained on 1 kHz logs). The training-time input normalization is
-not published, so none is applied here.
+The window is counted in environment steps, so at 50 Hz it spans 3 s, where the published
+model was trained on 150 ms of 1 kHz logs. 
 """
 
 from __future__ import annotations
@@ -43,9 +42,43 @@ CHANNEL_GROUPS = ("joint_pos", "joint_vel", "foot_pos", "foot_vel")
 WINDOW_SIZE = 150
 # class index -> contact of (LEG_ORDER[0], ..., LEG_ORDER[3]), most significant bit first
 CLASS_MSB_FIRST = True
-# the published pipeline normalizes its inputs but does not give the statistics
-INPUT_MEAN: float | torch.Tensor = 0.0
-INPUT_STD: float | torch.Tensor = 1.0
+# The published pipeline standardizes its inputs and does not give the statistics, so these
+# were measured instead: 40 s of Go1 locomotion in MuJoCo at 1 kHz over ten commands, from
+# standing to 1 m/s, sideways and turning (tools/sim2sim, with a trained policy).
+#
+# Re-measure them for another robot or another gait; the statistics are of the data, not of
+# the network. The channel order is the one of this module: q, qd, p_f, v_f, leg-major.
+INPUT_MEAN: torch.Tensor = torch.tensor([
+    +0.1319, +0.7204, -1.5281, -0.1523, +0.6746, -1.5578,
+    +0.1549, +0.9451, -1.6257, -0.1530, +0.9715, -1.5875,
+    +0.0116, +0.0175, +0.0051, -0.0072, -0.0226, +0.0145,
+    -0.0037, -0.0016, -0.0185, +0.0045, +0.0297, -0.0039,
+    +0.1990, +0.1653, -0.2832, +0.2168, -0.1705, -0.2760,
+    -0.2288, +0.1699, -0.2681, -0.2426, -0.1696, -0.2688,
+    -0.0065, +0.0032, +0.0063, +0.0119, +0.0014, +0.0033,
+    +0.0033, -0.0024, -0.0012, -0.0064, -0.0072, +0.0048,
+])
+INPUT_STD: torch.Tensor = torch.tensor([
+    +0.0844, +0.2451, +0.1905, +0.0603, +0.2452, +0.1664,
+    +0.0741, +0.1494, +0.1631, +0.0880, +0.1989, +0.1648,
+    +1.1022, +3.1581, +3.4028, +0.7871, +2.9684, +3.2517,
+    +0.8016, +1.8476, +2.7371, +0.9977, +2.3178, +2.9143,
+    +0.0700, +0.0255, +0.0326, +0.0688, +0.0191, +0.0299,
+    +0.0500, +0.0222, +0.0235, +0.0648, +0.0260, +0.0223,
+    +0.7514, +0.2654, +0.5171, +0.7536, +0.2498, +0.4800,
+    +0.6303, +0.2235, +0.4169, +0.6884, +0.2851, +0.4017,
+])
+
+
+def normalize(features):
+    """Standardize the channels of a feature vector, or of a whole window of them.
+
+    Takes a torch tensor or a numpy array and gives back the same kind, so the environments
+    and the sim-to-sim harness normalize their inputs the one way.
+    """
+    if isinstance(features, torch.Tensor):
+        return (features - INPUT_MEAN.to(features.device)) / INPUT_STD.to(features.device)
+    return (features - INPUT_MEAN.numpy()) / INPUT_STD.numpy()
 
 #: Go1 foot bodies in the order ContactNet expects
 GO1_FEET = tuple(f"{LEG_TO_GO1[leg]}_foot" for leg in LEG_ORDER)

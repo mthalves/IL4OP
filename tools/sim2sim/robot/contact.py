@@ -31,7 +31,6 @@ class ContactNet:
                        for leg in cnet_module.LEG_ORDER for j in cnet_module.JOINT_ORDER]
         self.qpos_idx = np.array([sim.model.jnt_qposadr[sim._joint(n)] for n in joint_names])
         self.qvel_idx = np.array([sim.model.jnt_dofadr[sim._joint(n)] for n in joint_names])
-        self.default = np.array([sim.cfg["default"][n] for n in joint_names])
         self.foot_ids = [mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_BODY, f)
                          for f in cnet_module.GO1_FEET]
 
@@ -52,12 +51,13 @@ class ContactNet:
             foot_pos.append(rot.T @ (data.xpos[foot] - base_pos))
             foot_vel.append(rot.T @ (velocity[3:] - base_vel[3:]))
 
-        return np.concatenate([
-            data.qpos[self.qpos_idx] - self.default,
+        # the same channels, in the same order and the same units, as the environments
+        return self.cnet.normalize(np.concatenate([
+            data.qpos[self.qpos_idx],
             data.qvel[self.qvel_idx],
             np.concatenate(foot_pos),
             np.concatenate(foot_vel),
-        ])
+        ]))
 
     def probabilities(self) -> np.ndarray:
         features = self._features()

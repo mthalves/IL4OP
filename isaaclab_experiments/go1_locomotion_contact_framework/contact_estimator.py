@@ -70,7 +70,7 @@ class ContactEstimator:
         foot_vel = quat_apply_inverse(root_quat, foot_vel).reshape(joint_pos.shape[0], -1)
 
         features = torch.cat([joint_pos, joint_vel, foot_pos, foot_vel], dim=-1)
-        return (features - cnet_module.INPUT_MEAN) / cnet_module.INPUT_STD
+        return cnet_module.normalize(features)
 
     def update(self, env) -> torch.Tensor:
         """Advance the window and return the contact probabilities of the current step.
