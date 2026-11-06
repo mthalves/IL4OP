@@ -54,6 +54,13 @@ ask_yes_no() {
     [[ "${answer,,}" == y* ]]
 }
 
+# the same question for an option that is on unless it is turned off
+ask_yes_default() {
+    local answer=""
+    read -r -p "$1 [Y/n]: " answer || true
+    [[ "${answer,,}" != n* ]]
+}
+
 # ask_menu <prompt> <option>... -> index (1-based) of the chosen option in MENU_CHOICE
 ask_menu() {
     local prompt="$1"; shift
@@ -196,6 +203,7 @@ echo "   ok"
 NUM_ENVS="$DEF_NUM_ENVS"; MAX_ITERATIONS="$DEF_MAX_ITERATIONS"
 TIME_LIMIT="$DEF_TIME"; PARTITION="$DEF_PARTITION"; CPUS="$DEF_CPUS"; MEM="$DEF_MEM"
 SEED=""; VIDEO=0; EXTRA=""
+OVERRIDES=(); RUN_PARTS=()
 
 title "6) Advanced options"
 if ask_yes_no "   change the training and SLURM defaults?"; then
@@ -203,6 +211,23 @@ if ask_yes_no "   change the training and SLURM defaults?"; then
     NUM_ENVS="$(ask_text "   environments to simulate" "$DEF_NUM_ENVS")"
     MAX_ITERATIONS="$(ask_text "   training iterations" "$DEF_MAX_ITERATIONS")"
     SEED="$(ask_text "   seed (empty = default)" "")"
+    if [[ "$TASK" == *Unitree-Go1* ]]; then
+        echo "   -- Go1 task options"
+        if ! ask_yes_default "   train with the feet air time (swing time) reward?"; then
+            OVERRIDES+=("env.rewards.feet_air_time.weight=0.0"); RUN_PARTS+=("noairtime")
+        fi
+        if [[ "$TASK" == *-CCR-* || "$TASK" == *-ContactFramework-* ]]; then
+            while true; do
+                CCR_WEIGHT="$(ask_text "   weight of the contact consistency reward (CCR)" "0.05")"
+                [[ "$CCR_WEIGHT" =~ ^[0-9]*\.?[0-9]+$ ]] && break
+                warn "'$CCR_WEIGHT' is not a positive number"
+            done
+            if [ "$CCR_WEIGHT" != "0.05" ]; then
+                OVERRIDES+=("env.rewards.contact_consistency.weight=$CCR_WEIGHT"); RUN_PARTS+=("ccr$CCR_WEIGHT")
+            fi
+        fi
+        echo "   -- general"
+    fi
     ask_yes_no "   record a video during training?" && VIDEO=1
     EXTRA="$(ask_text "   extra arguments for the training script (empty = none)" "")"
     echo "   -- slurm"
@@ -219,10 +244,18 @@ SHORT_TASK="$(printf '%s' "$TASK" | sed -E 's/^(Isaac|IL4OP)-//; s/-v[0-9]+$//' 
 JOB_NAME="$(printf '%s' "${USER_NAME:+$USER_NAME-}$SHORT_TASK" | cut -c1-60)"
 
 TRAIN_ARGS=(--task "$TASK" --headless --num_envs "$NUM_ENVS" --max_iterations "$MAX_ITERATIONS")
-[ -n "$SEED" ] && TRAIN_ARGS+=(--seed "$SEED")
+[ -n "$SEED" ] && TRAIN_ARGS+=(--seed "$SEED") && RUN_PARTS+=("seed$SEED")
 [ "$VIDEO" = "1" ] && TRAIN_ARGS+=(--video)
+# the run folder is "<timestamp>_<run name>": what the options changed is in its name, so runs
+# of one task made with different settings or seeds are told apart without opening a config
+if [ "${#RUN_PARTS[@]}" -gt 0 ] && [[ "$EXTRA" != *--run_name* ]]; then
+    RUN_NAME="$(IFS=_; printf '%s' "${RUN_PARTS[*]}")"
+    TRAIN_ARGS+=(--run_name "$RUN_NAME")
+fi
 # shellcheck disable=SC2206
 [ -n "$EXTRA" ] && TRAIN_ARGS+=($EXTRA)
+# Hydra overrides of the configuration come last
+[ "${#OVERRIDES[@]}" -gt 0 ] && TRAIN_ARGS+=("${OVERRIDES[@]}")
 
 SBATCH_ARGS=(
     --job-name="$JOB_NAME"

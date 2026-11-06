@@ -43,6 +43,9 @@ def main():
     parser.add_argument("--nominal", default="current", choices=("current", "legacy"),
                         help="the pose the policy was trained around; 'legacy' is the Isaac Lab"
                              " default, used by the Go1 policies trained before STAND_POSE")
+    parser.add_argument("--joint_damping", type=float, default=None,
+                        help="viscous damping of the leg joints in N m s/rad (default 0, an ideal PD);"
+                             " 0.26 makes a Go1 respond like the actuator network it is trained with")
     parser.add_argument("--height", type=float, default=0.33,
                         help="base height command of the Go2W flat-z policies (0.25 - 0.40)")
     parser.add_argument("--command", type=float, nargs=3, default=[1.0, 0.0, 0.0],
@@ -63,7 +66,7 @@ def main():
     if args.policy is None and not args.teleop:
         parser.error("--policy is needed for a scripted run; --teleop works without one")
 
-    sim = Sim2Sim(args.robot, args.policy, args.obs_dim, args.nominal)
+    sim = Sim2Sim(args.robot, args.policy, args.obs_dim, args.nominal, args.joint_damping)
     sim.height_command = args.height
     sim.reset()
 
@@ -101,7 +104,7 @@ def main():
 
     print(f"\npolicy   : {args.policy}")
     print(f"robot    : {args.robot}   command: vx={command[0]} vy={command[1]} wz={command[2]}")
-    print(f"simulated: {steps * dt:.1f} s at {1 / dt:.0f} Hz")
+    print(f"simulated: {steps * dt:.1f} s at {1 / dt:.0f} Hz   joint damping {sim.joint_damping:g}")
     print("-" * 56)
     if fell_at is None:
         print(f"  stayed up for the whole run")

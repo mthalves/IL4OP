@@ -61,7 +61,7 @@ what the planning environment feeds it.
 
 ## Legged locomotion
 
-Four task packages, all velocity-tracking on flat and rough terrain, trained with RSL-RL. Each
+Three task packages, all velocity-tracking on flat and rough terrain, trained with RSL-RL. Each
 one also registers a `-Play-v0` variant with fewer environments and no randomization.
 
 ### Unitree Go1
@@ -77,7 +77,10 @@ and a tip-over termination.
 | `IL4OP-Velocity-Flat-Unitree-Go1-v0` | flat terrain |
 | `IL4OP-Velocity-Rough-Unitree-Go1-v0` | rough terrain with curriculum |
 
-It is also set up to be deployed rather than only trained, which is what the four settings
+These are the baseline of the ablation below; the other variants of this package differ from them in
+exactly one or two switches.
+
+It is also set up to be deployed rather than only trained, which is what the settings
 at the top of `rough_env_cfg.py` and `velocity_env_cfg.py` are about:
 
 | | |
@@ -86,6 +89,8 @@ at the top of `rough_env_cfg.py` and `velocity_env_cfg.py` are about:
 | `OBSERVE_BASE_LIN_VEL` | off: a Go1 cannot measure its linear velocity, so the policy reads the 45 numbers it does have and the critic is given the true velocity instead (`obs_groups` in the agent config) |
 | `ACTION_DELAY_STEPS` | the commanded targets reach the motors up to 10 ms late, drawn per robot, as they do over a real bus |
 | `USE_SENSORS` | off: no height scanner, so the policy is blind to the terrain ahead, as the robot is |
+| `FEET_AIR_TIME_WEIGHT` | the swing-time reward, 0.25. An option of the task, not of the ablation: 0 trains without it, and for one run `env.rewards.feet_air_time.weight=0.0` does the same without editing (`tools/slurm/submit.sh` asks) |
+| `ACTUATOR_MODEL` | `"net"`: Isaac Lab's learned actuator network, fitted to a real Go1; `"pd"`: the ideal PD of `tools/sim2sim`, with randomized gains. The network damps joint velocities like `kd` 0.76 where the PD has 0.5, so the same policy moves its joints 20 - 25% faster on the PD |
 
 Standing still is treated as a posture to hold rather than an absence of walking: the feet
 all stay on the ground and the joints return to the nominal pose when there is nothing to
@@ -95,19 +100,47 @@ do, so the robot can be handed back to the controller from wherever it stops.
 python isaaclab_experiments/train_rsl_rl.py --task IL4OP-Velocity-Rough-Unitree-Go1-v0 --headless
 ```
 
-### Unitree Go1 with contact estimation
+### Unitree Go1 with ContactNet: the ablation
 
-Two packages build on the Go1 task with **ContactNet**, a learned contact estimator (CNN and
-GRU over a 150-step window of 48 proprioceptive channels) that returns a contact probability
-per foot, in the order `LF, RF, LH, RH`.
+**ContactNet** is a learned contact estimator (CNN and GRU over a 150-step window of 48 proprioceptive
+channels) that returns a contact probability per foot, in the order `LF, RF, LH, RH`. Two proposals use
+it, and each can be switched on or off independently:
 
-| Package | Task prefix | What it adds |
-|---|---|---|
-| `go1_locomotion_contact_consistency/` | `...-Go1-ContactConsistency-v0` | a reward for agreeing with the estimator: `1 - ¼ Σ|ĉᵢ - cᵢ|`, weight `0.05` |
-| `go1_locomotion_contact_framework/` | `...-Go1-ContactFramework-v0` | the same reward, **and** the four probabilities as policy observations (48 -> 52 inputs) |
+| | |
+|---|---|
+| **CEP**, contact probability estimation | the four probabilities are **observed** by the policy (45 -> 49 inputs) |
+| **CCR**, contact consistency reward | the policy is **rewarded** for agreeing with the simulated contacts: `1 - ¼ Σ|ĉᵢ - cᵢ|`, weight `0.05` |
 
-Both come in `Flat` and `Rough` variants, and both carry their own copy of `cnet.py` and the
-checkpoint, so a task is self-contained.
+Four tasks per terrain follow, all in `go1_locomotion/`:
+
+| Variant | CEP | CCR | Task (`Rough`; `Flat` for flat terrain) | Policy inputs |
+|---|:-:|:-:|---|:-:|
+| baseline | | | `IL4OP-Velocity-Rough-Unitree-Go1-v0` | 45 |
+| CEP | yes | | `IL4OP-Velocity-Rough-Unitree-Go1-CEP-v0` | 49 |
+| CCR | | yes | `IL4OP-Velocity-Rough-Unitree-Go1-CCR-v0` | 45 |
+| contact framework | yes | yes | `IL4OP-Velocity-Rough-Unitree-Go1-ContactFramework-v0` | 49 |
+
+Each has a `-Play-v0` twin. The two switches are `cep` and `ccr` on `UnitreeGo1RoughEnvCfg`, and the
+variants are subclasses that set them (`UnitreeGo1CEPRoughEnvCfg`, ...), which is how the PPO runners
+`UnitreeGo1RoughPPORunnerCfg`, `UnitreeGo1CEPRoughPPORunnerCfg`, ... are laid out too. **Everything
+else is shared** -- every reward weight, the randomization, the network and the PPO settings -- so a
+difference between two variants is a difference in the switches and nothing else. Run the whole
+ablation with one loop:
+
+```bash
+for variant in "" "-CEP" "-CCR" "-ContactFramework"; do
+    python isaaclab_experiments/train_rsl_rl.py --task IL4OP-Velocity-Rough-Unitree-Go1${variant}-v0 --headless
+done
+```
+
+Runs are logged under `logs/rsl_rl/unitree_go1_<variant>_<terrain>` (`unitree_go1_rough`,
+`unitree_go1_cep_rough`, `unitree_go1_ccr_rough`, `unitree_go1_contact_framework_rough`), and each
+run's `params/env.yaml` records the switches. A policy that observes the estimate (CEP, contact
+framework) is exported and run in `tools/sim2sim` with `--obs_dim 49`; one that does not (baseline,
+CCR) is the same 45-input policy -- CCR changes how it is trained, not what it reads, so it deploys
+exactly like the baseline. `go1_locomotion/mdp/` holds the terms (`contact_probabilities`,
+`contact_consistency`), and `contact_estimator.py` the estimator they share, which runs the network
+once per step however many of them are on. `cnet.py` and `CNET.ckpt` are the network and its weights.
 
 ### Unitree Go2W
 

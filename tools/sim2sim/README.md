@@ -15,6 +15,10 @@ python tools/sim2sim/play.py --robot go1 \
     --policy logs/rsl_rl/unitree_go1_rough/<run>/exported/policy.pt \
     --command 1.0 0 0 --duration 10
 
+# the same battery of commands for every policy, under what a real Go1 differs by (see below)
+python tools/sim2sim/evaluate.py \
+    --policy logs/rsl_rl/unitree_go1_rough/<run>/exported/policy.pt
+
 # drive it yourself, as you would the real robot
 python tools/sim2sim/play.py --robot go1 --teleop --control ramp \
     --policy logs/rsl_rl/unitree_go1_rough/<run>/exported/policy.pt
@@ -66,9 +70,10 @@ python isaaclab_experiments/play_rsl_rl.py --task IL4OP-Velocity-Rough-Unitree-G
 # -> logs/rsl_rl/unitree_go1_rough/<run>/exported/policy.pt
 ```
 
-Pass `--obs_dim` for anything but the default 45: `49` for the Go1 contact-framework
-policies, `48` / `52` for Go1 policies trained while the base linear velocity was still in
-the observation, and `57` / `60` / `61` for Go2W flat / rough / flat-z.
+Pass `--obs_dim` for anything but the default 45: `49` for the Go1 policies that observe the
+contact estimate (the CEP and contact-framework tasks; CCR and baseline policies are 45), `48` /
+`52` for Go1 policies trained while the base linear velocity was still in the observation, and
+`57` / `60` / `61` for Go2W flat / rough / flat-z.
 
 A policy also has to be run with the nominal pose it was trained around, because that pose
 is the zero of both its action and the joint positions it reads. `--nominal legacy` is the
@@ -76,9 +81,8 @@ Isaac Lab default pose that the Go1 policies trained before `STAND_POSE` used; w
 they stand 42 mm too low and the comparison means nothing.
 
 Nothing else is needed: the harness runs on the `torch` and `numpy` the project already has, and
-needs a display only for the viewer. The Go1 contact-framework policies also read `cnet.py` and
-its checkpoint from `isaaclab_experiments/go1_locomotion_contact_framework/`, which are in the
-repository.
+needs a display only for the viewer. The Go1 policies that observe the contact estimate also read
+`cnet.py` and its checkpoint from `isaaclab_experiments/go1_locomotion/`, which are in the repository.
 
 ## Driving it
 
@@ -159,6 +163,7 @@ What is still missing before a policy drives the hardware:
 | the joint order | Isaac Lab orders the joints by type (all hips, all thighs, all calves), the SDK by leg; getting this wrong is the classic way to break a robot |
 | calibration | the encoder zero of a real Go1 is not the zero of the URDF, and an offset of a few degrees is a different posture |
 | safety | a torque and velocity clamp, a tip-over cut-out and a damping fallback on the deployment side, not in the policy |
+| ContactNet on the robot | for the CEP and contact-framework policies: the 48 channels have to be rebuilt from what the robot measures, at 50 Hz and over the same 150-step window. The foot velocity is the velocity *relative to the trunk*, `ω × r + J(q) q̇` (gyro and leg Jacobian), not `J(q) q̇` alone, and the standardization is the one in `cnet.py` |
 | the gap that is left | flat floor only here, no estimator in the loop, and the actuator network stands in for the motors |
 
 ## What it checks, and what it does not
@@ -171,14 +176,59 @@ Known limits, so the results are read for what they are:
 
 - the floor is flat, so a rough-terrain policy is only partly exercised;
 - `base_lin_vel` is taken from the simulator, which the real robot has to estimate;
-- the Go1 contact-framework policies run ContactNet on the simulated state, with the
-  normalization constants the paper does not publish left at zero mean and unit variance.
+- the motors are an ideal PD (`kp` 20, `kd` 0.5), while Isaac Lab trains the Go1 through a learned
+  actuator network whose response to a velocity is that of `kd` = 0.76 -- measured on the network
+  itself -- and whose torque falls off with joint speed. Left alone, the same policy moves its joints
+  about 30% faster here at 1 m/s than it did in training; `--joint_damping 0.26` (N m s/rad, on top of
+  `kd`) closes that gap, and is the setting to use when comparing against numbers from Isaac Lab;
+- the Go1 policies that observe the contact estimate run ContactNet on the simulated state,
+  standardized with statistics measured for it in `cnet.py` -- the paper does not publish its own.
+
+## Isaac Lab and MuJoCo, side by side
+
+What a Go1 policy is trained on and what this harness runs it on. The same policy was run in both,
+and in Isaac Lab on an ideal PD as well, to tell the actuator apart from the rest; the actuator and
+the mass were measured on their own, the other rows were not isolated, and the agreement below is
+the only evidence about them.
+
+| | Isaac Lab (training) | MuJoCo (this harness) | what it does to a policy |
+|---|---|---|---|
+| policy / control rate | 50 Hz, PD at 200 Hz (5 ms) | 50 Hz, PD at 1 kHz (1 ms) | not isolated |
+| actuator | learned network: `kp` 19.6, `kd` 0.76, torque limit falling to 0 at 30 rad/s | ideal PD: `kp` 20, `kd` 0.5, flat limit 23.7 N m (35.55 at the knee) | **the one systematic gap**: +20 - 40% peak joint speed and joint jitter at 1 m/s; `--joint_damping 0.26` closes it |
+| rotor inertia | 0.005 - 0.007 (hips, thighs), 0.011 - 0.017 (knees), random | 0.0059, 0.0141 | same |
+| joint friction | 0 - 0.04, random | none | not isolated |
+| robot mass | asset 13.10 kg, trunk -2 .. +2 kg | URDF 12.03 kg | about +6% torque and -4 mm of ride height per kg; no change in gait |
+| action latency | 0 - 10 ms, random per robot | none | not isolated |
+| ground friction | 0.4 - 1.2, random | 1.0 | not isolated |
+| joint limits | 90% of the URDF's, soft | the URDF's, hard | not isolated |
+
+For policies trained with the current rewards the two agree on ride height (about 1 cm), tilt,
+velocity tracking, torque and action rate (about 15%); none fell in either. Two behaviours that looked like
+sim-to-sim failures on the first Go1 policies were there in Isaac Lab as well, so they are the
+policies' and not the harness': a foot held off the floor at a standstill, and a sagging stance.
+The Go1 contact-framework policy trained before ContactNet's inputs were standardized also stands
+low in both, because the estimate it reads is no longer the one it learned on.
+
+## Evaluating a policy
+
+`evaluate.py` runs the same seven commands (standing, forwards, backwards, sideways, turning, a mix)
+under six conditions and reports the worst case of each: the harness as it is; `damped`, which
+matches the actuator the policy was trained with and is the one to compare with Isaac Lab; and then
+on top of `damped` a heavier trunk (+2 kg), a slippery floor (friction 0.4), encoders 0.03 rad off
+the model's zero, and a command reaching the motors 20 ms late. Those are the four ways a real
+Go1 most plausibly differs from the training, with the margin the randomization of the training
+leaves (latency was trained up to 10 ms, calibration not at all). A condition passes if the robot
+stays up through all the commands; the other columns -- tilt, tracking, torque against its limit,
+peak joint speed, action rate, joint jitter -- are for comparing policies, and `--detail` splits
+them by command. A policy that fails one of these is not ready for the robot, whatever it does
+in the nominal case.
 
 ## The code
 
 | | |
 |---|---|
 | `play.py` | the command line and the scripted run |
+| `evaluate.py` | the battery of commands and conditions, for comparing policies |
 | `build_models.py` | URDF to MuJoCo scene |
 | `robot/specs.py` | the two robots: joints, poses, gains, observations, limits |
 | `robot/simulation.py` | the model, the motors, and the observation a policy reads |

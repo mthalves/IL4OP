@@ -240,7 +240,7 @@ work right after the installation.
 
 ### 5. (Optional) Train a locomotion policy:
 - The same scripts train the legged-locomotion tasks this repository adds for the **Unitree Go1** (plain,
-  and two variants that use a learned contact estimator) and the **Unitree Go2W** (including a commanded
+  and the ablation of two proposals that use a learned contact estimator) and the **Unitree Go2W** (including a commanded
   base height). They are listed, with what each one changes, in
   **[isaaclab_experiments/README.md](isaaclab_experiments/README.md)**:
    ```bash

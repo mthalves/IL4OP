@@ -5,7 +5,9 @@
 
 # Copied from IsaacLab 2.3.2 (isaaclab_tasks/manager_based/locomotion/velocity/config/go1/rough_env_cfg.py) for local modification.
 import math
+from typing import ClassVar
 
+from isaaclab.actuators import IdealPDActuatorCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
@@ -13,6 +15,7 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
 
 import isaaclab_experiments.go1_locomotion.mdp as mdp
+from isaaclab_experiments.go1_locomotion.cnet import GO1_FEET as CNET_FEET
 from isaaclab_experiments.go1_locomotion.velocity_env_cfg import (
     LocomotionVelocityRoughEnvCfg,
     RewardsCfg,
@@ -50,6 +53,30 @@ STAND_HEIGHT = 0.329
 #: robot can. Set to 0 to command the joints the instant the policy decides.
 ACTION_DELAY_STEPS = 2
 
+#: Weight of the swing-time reward (``feet_air_time``), which pays a foot for the time it spends in
+#: the air above ``threshold`` and punishes a step shorter than that. It is an option of the task and
+#: not part of the ContactNet ablation: every variant takes it the same way. 0 trains without it
+#: (what the first "no air feet" run did); for one run, without editing this file, override it:
+#: ``env.rewards.feet_air_time.weight=0.0`` (tools/slurm/submit.sh asks for it).
+FEET_AIR_TIME_WEIGHT = 0.0
+
+#: What turns the joint targets of the policy into torque while it trains.
+#:
+#: ``"net"`` is the learned actuator network Isaac Lab ships for the Go1, fitted to a real robot
+#: at the gains it runs (kp 20, kd 0.5). It holds what the motors do and an ideal PD does not:
+#: it answers a velocity like kd = 0.76 (measured on the network), and the torque it can give
+#: falls off with the speed of the joint.
+#:
+#: ``"pd"`` is an ideal PD at those gains, which is what tools/sim2sim drives MuJoCo with, with
+#: the stiffness and the damping randomized (kd 0.4 - 0.8, so the policy is tied to neither the
+#: ideal PD nor the network). The same policy moves its joints 20 - 25% faster on the ideal PD
+#: than on the network, in Isaac Lab and in MuJoCo alike. Pick it to train for the harness;
+#: keep "net" to train for the robot the network was fitted to.
+ACTUATOR_MODEL = "net"
+
+# ContactNet orders the feet (LF, RF, LH, RH)
+FEET_CNET = list(CNET_FEET)
+
 @configclass
 class UnitreeGo1RewardsCfg(RewardsCfg):
     """Rewards of the base task plus gait-quality and hardware-safety terms."""
@@ -78,6 +105,20 @@ class UnitreeGo1RewardsCfg(RewardsCfg):
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=FEET, preserve_order=True),
             "min_distance": 0.28,
+        },
+    )
+
+    # -- CCR: reward the agent when the contacts estimated by ContactNet match the simulated
+    # ones. Present in every variant of this class and removed by the task unless it is a CCR
+    # one (see ``UnitreeGo1RoughEnvCfg.ccr``)
+    contact_consistency = RewTerm(
+        func=mdp.contact_consistency,
+        weight=0.05,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=FEET_CNET, preserve_order=True),
+            "threshold": 1.0,
+            "use_probabilities": True,
         },
     )
 
@@ -129,6 +170,33 @@ class UnitreeGo1TerminationsCfg(TerminationsCfg):
 
 @configclass
 class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
+    """The Go1 velocity task, with the two ContactNet proposals as switches.
+
+    The two switches are the whole of the ablation: everything else -- every reward weight,
+    every randomization, the network and the PPO settings -- is shared, so two tasks that
+    differ in a switch differ in nothing else.
+
+    ==================  =======  =======  =========================================
+    task                ``cep``  ``ccr``  what the policy gets from ContactNet
+    ==================  =======  =======  =========================================
+    baseline            no       no       nothing
+    CEP                 yes      no       the four contact probabilities, observed
+    CCR                 no       yes      a reward for agreeing with the simulation
+    contact framework   yes      yes      both
+    ==================  =======  =======  =========================================
+
+    They are class constants, not fields: they say which task this is, so they are set by the
+    subclasses below and not by command-line overrides (which could not re-run this
+    ``__post_init__``). Each run's ``env.yaml`` records them all the same.
+    """
+
+    #: CEP, contact probability estimation: the policy observes the ContactNet estimate
+    #: (48 -> 52 inputs while the base velocity is observed, 45 -> 49 without it)
+    cep: ClassVar[bool] = False
+    #: CCR, contact consistency reward: the policy is rewarded for gaits whose contacts
+    #: ContactNet recognizes from proprioception
+    ccr: ClassVar[bool] = False
+
     rewards: UnitreeGo1RewardsCfg = UnitreeGo1RewardsCfg()
     terminations: UnitreeGo1TerminationsCfg = UnitreeGo1TerminationsCfg()
 
@@ -136,7 +204,35 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
 
+        # -- the ablation: both terms are defined above and the task keeps the ones it asks for
+        if not self.cep:
+            self.observations.policy.contact_probabilities = None
+        if not self.ccr:
+            self.rewards.contact_consistency = None
+
         self.scene.robot = UNITREE_GO1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        if ACTUATOR_MODEL == "pd":
+            self.scene.robot.actuators = {
+                "base_legs": IdealPDActuatorCfg(
+                    joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
+                    effort_limit=23.7,  # the motor of the spec sheet, as in the actuator network
+                    stiffness=20.0,
+                    damping=0.5,
+                )
+            }
+            self.events.actuator_gains = EventTerm(
+                func=mdp.randomize_actuator_gains,
+                mode="startup",
+                params={
+                    "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+                    "stiffness_distribution_params": (0.9, 1.1),
+                    "damping_distribution_params": (0.8, 1.6),
+                    "operation": "scale",
+                    "distribution": "uniform",
+                },
+            )
+        elif ACTUATOR_MODEL != "net":
+            raise ValueError(f"ACTUATOR_MODEL is 'net' or 'pd', not {ACTUATOR_MODEL!r}")
 
         if USE_SENSORS:
             self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/trunk"
@@ -163,7 +259,11 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             )
 
         # event
-        self.events.add_base_mass.params["mass_distribution_params"] = (-1.0, 3.0)
+        # The robot of the asset weighs 13.1 kg, and 12.0 kg is what the URDF and the spec sheet
+        # say (tools/sim2sim runs the URDF). Centred on the asset, -2..+2 kg on the trunk covers
+        # 11.1..15.1 kg: the real robot, and a battery or a payload on top. The former -1..+3
+        # started at 12.1 kg and averaged 14.1 kg, with the real robot outside the range.
+        self.events.add_base_mass.params["mass_distribution_params"] = (-2.0, 2.0)
         self.events.add_base_mass.params["asset_cfg"].body_names = "trunk"
         self.events.base_external_force_torque.params["asset_cfg"].body_names = "trunk"
         self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
@@ -239,7 +339,7 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # -- gait quality
         # a swing-time reward of 0.01 barely pays for lifting a foot, which is what
         # produces the shuffling, narrow-stance gait; 0.25 is the value used on flat
-        self.rewards.feet_air_time.weight = 0.25
+        self.rewards.feet_air_time.weight = FEET_AIR_TIME_WEIGHT
         self.rewards.feet_air_time.params["threshold"] = 0.4
         # -- hardware safety and motor stress
         # knees and thighs should never take the impacts
@@ -258,8 +358,12 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.base_contact.params["sensor_cfg"].body_names = "trunk"
 
 
-@configclass
-class UnitreeGo1RoughEnvCfg_PLAY(UnitreeGo1RoughEnvCfg):
+class PlayMixin:
+    """What a task shown to a person differs by: fewer robots, no randomization, no pushes.
+
+    Not a configclass of its own, so it can be put in front of any task of the family.
+    """
+
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -267,10 +371,10 @@ class UnitreeGo1RoughEnvCfg_PLAY(UnitreeGo1RoughEnvCfg):
         # make a smaller scene for play
         self.scene.num_envs = 50
         self.scene.env_spacing = 2.5
-        # spawn the robot randomly in the grid (instead of their terrain levels)
-        self.scene.terrain.max_init_terrain_level = None
-        # reduce the number of terrains to save memory
+        # on rough terrain: spawn the robot randomly in the grid (instead of their terrain
+        # levels) and reduce the number of terrains to save memory
         if self.scene.terrain.terrain_generator is not None:
+            self.scene.terrain.max_init_terrain_level = None
             self.scene.terrain.terrain_generator.num_rows = 5
             self.scene.terrain.terrain_generator.num_cols = 5
             self.scene.terrain.terrain_generator.curriculum = False
@@ -280,3 +384,45 @@ class UnitreeGo1RoughEnvCfg_PLAY(UnitreeGo1RoughEnvCfg):
         # remove random pushing event
         self.events.base_external_force_torque = None
         self.events.push_robot = None
+
+
+@configclass
+class UnitreeGo1RoughEnvCfg_PLAY(PlayMixin, UnitreeGo1RoughEnvCfg):
+    pass
+
+
+@configclass
+class UnitreeGo1CEPRoughEnvCfg(UnitreeGo1RoughEnvCfg):
+    """CEP only: the policy observes the contact probabilities."""
+
+    cep: ClassVar[bool] = True
+
+
+@configclass
+class UnitreeGo1CCRRoughEnvCfg(UnitreeGo1RoughEnvCfg):
+    """CCR only: the policy is rewarded for agreeing with ContactNet."""
+
+    ccr: ClassVar[bool] = True
+
+
+@configclass
+class UnitreeGo1ContactFrameworkRoughEnvCfg(UnitreeGo1RoughEnvCfg):
+    """The contact framework: CEP and CCR together."""
+
+    cep: ClassVar[bool] = True
+    ccr: ClassVar[bool] = True
+
+
+@configclass
+class UnitreeGo1CEPRoughEnvCfg_PLAY(PlayMixin, UnitreeGo1CEPRoughEnvCfg):
+    pass
+
+
+@configclass
+class UnitreeGo1CCRRoughEnvCfg_PLAY(PlayMixin, UnitreeGo1CCRRoughEnvCfg):
+    pass
+
+
+@configclass
+class UnitreeGo1ContactFrameworkRoughEnvCfg_PLAY(PlayMixin, UnitreeGo1ContactFrameworkRoughEnvCfg):
+    pass

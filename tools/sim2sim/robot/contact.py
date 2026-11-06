@@ -12,7 +12,7 @@ import torch
 REPO = Path(__file__).resolve().parents[3]
 
 class ContactNet:
-    """The contact estimator the contact-framework policy expects among its observations.
+    """The contact estimator a CEP policy (the CEP and contact-framework tasks) observes.
 
     It rebuilds, from the MuJoCo state, the window of proprioceptive features ContactNet was
     trained on (joint positions and velocities, foot positions and velocities in the base
@@ -20,7 +20,7 @@ class ContactNet:
     """
 
     def __init__(self, sim: "Sim2Sim"):
-        sys.path.insert(0, str(REPO / "isaaclab_experiments" / "go1_locomotion_contact_framework"))
+        sys.path.insert(0, str(REPO / "isaaclab_experiments" / "go1_locomotion"))
         import cnet as cnet_module
 
         self.cnet = cnet_module

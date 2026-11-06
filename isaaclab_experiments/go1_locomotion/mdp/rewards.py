@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from isaaclab.envs import mdp
-from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import ManagerTermBase, RewardTermCfg, SceneEntityCfg
 from isaaclab.sensors import ContactSensor
 from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 
@@ -198,3 +198,54 @@ def feet_stance_width(env, asset_cfg: SceneEntityCfg, min_distance: float) -> to
     front = torch.abs(pos_b[:, 0, 1] - pos_b[:, 1, 1])
     rear = torch.abs(pos_b[:, 2, 1] - pos_b[:, 3, 1])
     return (min_distance - front).clip(min=0.0) + (min_distance - rear).clip(min=0.0)
+
+
+class contact_consistency(ManagerTermBase):
+    """Reward agreement between the ContactNet estimate and the simulated contacts (CCR).
+
+    .. math::  R_{cc} = 1 - \\frac{1}{4}\\sum_{i=1}^{4} |\\hat{c}_i - c_i| \\in [0, 1]
+
+    where :math:`c` are the contacts measured by the contact sensor and :math:`\\hat c`
+    the contacts estimated by ContactNet from a window of proprioceptive history.
+
+    The estimator is shared with the ``contact_probabilities`` observation, so the network
+    runs once per step however many terms consume it (see
+    :mod:`~isaaclab_experiments.go1_locomotion.contact_estimator`).
+
+    Args:
+        asset_cfg: the articulation, used for the joint and foot states.
+        sensor_cfg: the contact sensor, whose ``body_names`` must resolve to the feet in
+            the order (LF, RF, LH, RH).
+        threshold: contact force above which a foot counts as in contact (N).
+        use_probabilities: compare against the soft contact probabilities, which is what
+            the network outputs; ``False`` compares against the most likely of the 16 states.
+    """
+
+    def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        from isaaclab_experiments.go1_locomotion.contact_estimator import get_contact_estimator
+
+        asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.estimator = get_contact_estimator(env, asset_cfg.name)
+
+    def reset(self, env_ids: torch.Tensor | None = None):
+        self.estimator.reset(env_ids)
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg,
+        sensor_cfg: SceneEntityCfg,
+        threshold: float = 1.0,
+        use_probabilities: bool = True,
+    ) -> torch.Tensor:
+        # the estimate of this step, computed here or already cached by the observation
+        self.estimator.update(env)
+        estimate = self.estimator.probabilities if use_probabilities else self.estimator.contacts
+
+        # contacts measured in simulation, in the same foot order as ContactNet
+        sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+        forces = sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0]
+        contacts = (forces > threshold).float()
+
+        return 1.0 - torch.abs(estimate - contacts).mean(dim=-1)

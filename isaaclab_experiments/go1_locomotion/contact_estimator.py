@@ -1,9 +1,10 @@
 """Shared ContactNet estimator: one evaluation per environment step.
 
-Both the ``contact_probabilities`` observation and the ``contact_consistency`` reward
-need the estimate of the same step. They therefore share a single estimator per
-environment instance, which keeps the rolling window, runs the network once per step and
-caches the result for every other consumer of that step.
+Both the ``contact_probabilities`` observation (CEP) and the ``contact_consistency``
+reward (CCR) need the estimate of the same step. They therefore share a single estimator
+per environment instance, which keeps the rolling window, runs the network once per step
+and caches the result for every other consumer of that step. An environment that uses
+only one of the two simply has one consumer.
 """
 
 from __future__ import annotations

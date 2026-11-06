@@ -48,7 +48,42 @@ class UnitreeGo1FlatPPORunnerCfg(UnitreeGo1RoughPPORunnerCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.max_iterations = 20000
         self.experiment_name = "unitree_go1_flat"
-        self.policy.actor_hidden_dims = [128, 128, 128]
-        self.policy.critic_hidden_dims = [128, 128, 128]
+
+@configclass
+class UnitreeGo1CEPRoughPPORunnerCfg(UnitreeGo1RoughPPORunnerCfg):
+    experiment_name = "unitree_go1_cep_rough"
+
+
+@configclass
+class UnitreeGo1CEPFlatPPORunnerCfg(UnitreeGo1FlatPPORunnerCfg):
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.experiment_name = "unitree_go1_cep_flat"
+
+
+@configclass
+class UnitreeGo1CCRRoughPPORunnerCfg(UnitreeGo1RoughPPORunnerCfg):
+    experiment_name = "unitree_go1_ccr_rough"
+
+
+@configclass
+class UnitreeGo1CCRFlatPPORunnerCfg(UnitreeGo1FlatPPORunnerCfg):
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.experiment_name = "unitree_go1_ccr_flat"
+
+
+@configclass
+class UnitreeGo1ContactFrameworkRoughPPORunnerCfg(UnitreeGo1RoughPPORunnerCfg):
+    experiment_name = "unitree_go1_contact_framework_rough"
+
+
+@configclass
+class UnitreeGo1ContactFrameworkFlatPPORunnerCfg(UnitreeGo1FlatPPORunnerCfg):
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.experiment_name = "unitree_go1_contact_framework_flat"

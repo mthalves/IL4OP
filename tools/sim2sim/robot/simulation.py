@@ -13,7 +13,8 @@ from .contact import ContactNet
 from .specs import ROBOTS
 
 class Sim2Sim:
-    def __init__(self, robot: str, policy_path: Path | None, obs_dim: int, nominal: str = "current"):
+    def __init__(self, robot: str, policy_path: Path | None, obs_dim: int, nominal: str = "current",
+                 joint_damping: float | None = None):
         self.cfg = ROBOTS[robot]
         self.model = mujoco.MjModel.from_xml_path(str(self.cfg["scene"]))
         self.data = mujoco.MjData(self.model)
@@ -35,6 +36,12 @@ class Sim2Sim:
         self.default = np.array([pose[n] for n in names])
         self.is_wheel = np.array([n in self.cfg["wheels"] for n in names])
 
+        # Viscous damping of the leg joints, on top of the kd of the controller. Zero is an
+        # ideal PD. Isaac Lab drives the Go1 through a learned actuator whose response to a
+        # velocity is that of kd = 0.76, not the 0.5 it is commanded: 0.26 reproduces it here.
+        self.joint_damping = self.cfg.get("joint_damping", 0.0) if joint_damping is None else joint_damping
+        self.model.dof_damping[self.qvel_idx[~self.is_wheel]] = self.joint_damping
+
         def per_joint(value):
             return np.array([value[n] for n in names]) if isinstance(value, dict) else np.full(len(names), value)
 
@@ -54,6 +61,13 @@ class Sim2Sim:
         self.base_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, self.cfg["base_body"])
 
         self.actions = np.zeros(len(names))
+        # What the real robot has and the model does not, off by default and set by whoever tests
+        # a policy against it (evaluate.py): an encoder whose zero is not the model's, in rad
+        # per joint, read by the policy and by the controller alike; and a command that reaches
+        # the motors this many control steps (1 ms) late.
+        self.joint_bias = np.zeros(len(names))
+        self.latency_steps = 0
+        self._target = None
         self.torque_limit = self.model.actuator_ctrlrange[self.act_idx, 1]
 
     def _load_policy(self, policy_path: Path):
@@ -85,6 +99,7 @@ class Sim2Sim:
         self.data.qpos[self.qpos_idx] = self.default
         self.data.qpos[2] = self.cfg["spawn_height"]   # drop it just above the floor
         self.actions[:] = 0.0
+        self._target = None
         mujoco.mj_forward(self.model, self.data)
 
     # ------------------------------------------------------------------ states
@@ -104,7 +119,7 @@ class Sim2Sim:
         lin_vel_b, ang_vel_b = self.base_velocity()
         gravity_b = self.base_rotation().T @ np.array([0.0, 0.0, -1.0])
 
-        joint_pos = self.data.qpos[self.qpos_idx] - self.default   # joint_pos_rel
+        joint_pos = self.data.qpos[self.qpos_idx] - self.joint_bias - self.default   # joint_pos_rel
         # a wheel angle carries no information, so Isaac Lab zeroes it in the observation
         joint_pos = np.where(self.is_wheel, 0.0, joint_pos)
 
@@ -128,7 +143,7 @@ class Sim2Sim:
     # ------------------------------------------------------------------- loop
     def drive(self, target: np.ndarray, kp: np.ndarray, kd: np.ndarray):
         """One turn of the position control, the loop that runs at 1 kHz on the robot."""
-        error = target - self.data.qpos[self.qpos_idx]
+        error = target - (self.data.qpos[self.qpos_idx] - self.joint_bias)
         self.data.ctrl[self.act_idx] = self._saturate(
             kp * error - kd * self.data.qvel[self.qvel_idx])
         mujoco.mj_step(self.model, self.data)
@@ -182,14 +197,18 @@ class Sim2Sim:
             self.actions = self.policy(self.observation(command)).squeeze(0).numpy()
 
         target = self.default + self.action_scale * self.actions
-        for _ in range(self.cfg["decimation"]):
-            q = self.data.qpos[self.qpos_idx]
+        late = self._target if self._target is not None else target
+        for k in range(self.cfg["decimation"]):
+            q = self.data.qpos[self.qpos_idx] - self.joint_bias
             dq = self.data.qvel[self.qvel_idx]
+            # a command that is still on its way is the previous one
+            goal = late if k < self.latency_steps else target
             # legs follow a position target, wheels a velocity target (their stiffness is 0)
             torque = np.where(
                 self.is_wheel,
                 self.kd * (self.action_scale * self.actions - dq),
-                self.kp * (target - q) - self.kd * dq,
+                self.kp * (goal - q) - self.kd * dq,
             )
             self.data.ctrl[self.act_idx] = self._saturate(torque)
             mujoco.mj_step(self.model, self.data)
+        self._target = target

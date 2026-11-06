@@ -1,4 +1,4 @@
-"""CNET: contact estimation network used to shape the Go1 locomotion reward.
+"""CNET: the contact estimation network behind the CEP observation and the CCR reward.
 
 The network is a 1-D CNN followed by two GRUs and a classifier over the 16 possible
 contact states of the four feet. Its architecture is reconstructed from ``CNET.ckpt``
@@ -44,7 +44,7 @@ WINDOW_SIZE = 150
 CLASS_MSB_FIRST = True
 # The published pipeline standardizes its inputs and does not give the statistics, so these
 # were measured instead: 40 s of Go1 locomotion in MuJoCo at 1 kHz over ten commands, from
-# standing to 1 m/s, sideways and turning (tools/sim2sim, with a trained policy). 
+# standing to 1 m/s, sideways and turning (tools/sim2sim, with a trained policy).
 #
 # Re-measure them for another robot or another gait; the statistics are of the data, not of
 # the network. The channel order is the one of this module: q, qd, p_f, v_f, leg-major.
