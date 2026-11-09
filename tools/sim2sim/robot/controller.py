@@ -158,6 +158,10 @@ class Controller:
         # legs are never asked for a jump in position
         step = self.POSTURE_RATE * self.dt
         self.posture += np.clip(self.posture_target - self.posture, -step, step)
+        # a policy that observes ContactNet reads a window of the last 3 s: keep it moving while
+        # the policy does not drive (the policy's own step advances it when it does)
+        if self.state != self.POLICY and self.sim.contact_net is not None:
+            self.sim.contact_net.push()
         if self.state == self.FOLDED:
             # the robot waits in its folded pose, held by the controller
             self.sim.hold(self.folded, self.sim.rest_kp, self.sim.rest_kd)

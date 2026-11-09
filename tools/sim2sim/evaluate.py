@@ -1,6 +1,6 @@
 """Put an exported policy through a battery of commands and of things that differ on the robot.
 
-    python tools/sim2sim/evaluate.py --policy <run>/exported/policy.pt [--obs_dim 49]
+    python tools/sim2sim/evaluate.py --policy <run>/exported/policy.pt
 
 Every condition runs the same commands -- standing, forwards, sideways, turning and a mix -- on a
 flat floor and reports the worst case over them, so that policies, and variants of one policy, are
@@ -99,7 +99,9 @@ def run(policy, obs_dim, nominal, command, duration, damping=0.0, extra_mass=0.0
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--policy", type=Path, required=True, help="exported policy.pt")
-    parser.add_argument("--obs_dim", type=int, default=45, help="49 for a policy that observes ContactNet")
+    parser.add_argument("--obs_dim", type=int, default=None,
+                        help="input size of the policy; by default the one the policy has (45, or 49"
+                             " with ContactNet's estimate)")
     parser.add_argument("--nominal", default="current", choices=("current", "legacy"))
     parser.add_argument("--duration", type=float, default=8.0, help="seconds per command")
     parser.add_argument("--conditions", nargs="*", default=list(CONDITIONS), choices=list(CONDITIONS))
@@ -107,7 +109,10 @@ def main():
     parser.add_argument("--detail", action="store_true", help="one line per command instead of the worst case")
     args = parser.parse_args()
 
-    print(f"policy: {args.policy}   inputs: {args.obs_dim}   {args.duration:g} s per command")
+    sim = Sim2Sim("go1", args.policy, args.obs_dim, args.nominal)     # to say what the policy reads
+    inputs = f"{sim.obs_dim}" + (" (ContactNet)" if sim.contact_net is not None else "")
+    print(f"policy: {args.policy}   inputs: {inputs}   {args.duration:g} s per command")
+    args.obs_dim = sim.obs_dim
     header = (f"{'':10s}{'fell':>6s}{'tilt max':>9s}{'|dv| m/s':>9s}{'torque':>7s}{'peak/lim':>9s}"
               f"{'dq max':>7s}{'dA2':>6s}{'jitter':>7s}{'air':>5s}")
     verdicts = {}

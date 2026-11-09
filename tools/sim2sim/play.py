@@ -39,7 +39,9 @@ def main():
     parser.add_argument("--robot", default="go1", choices=sorted(ROBOTS))
     parser.add_argument("--policy", type=Path,
                         help="exported policy.pt; without it only the Unitree controller runs")
-    parser.add_argument("--obs_dim", type=int, default=45, help="input size of the policy")
+    parser.add_argument("--obs_dim", type=int, default=None,
+                        help="input size of the policy; by default the one the policy has (45, or 49"
+                             " with ContactNet's estimate)")
     parser.add_argument("--nominal", default="current", choices=("current", "legacy"),
                         help="the pose the policy was trained around; 'legacy' is the Isaac Lab"
                              " default, used by the Go1 policies trained before STAND_POSE")
@@ -102,7 +104,8 @@ def main():
     if viewer is not None:
         viewer.close()
 
-    print(f"\npolicy   : {args.policy}")
+    print(f"\npolicy   : {args.policy}   ({sim.obs_dim} inputs"
+          f"{', reads ContactNet' if sim.contact_net is not None else ''})")
     print(f"robot    : {args.robot}   command: vx={command[0]} vy={command[1]} wz={command[2]}")
     print(f"simulated: {steps * dt:.1f} s at {1 / dt:.0f} Hz   joint damping {sim.joint_damping:g}")
     print("-" * 56)

@@ -58,7 +58,7 @@ ACTION_DELAY_STEPS = 2
 #: not part of the ContactNet ablation: every variant takes it the same way. 0 trains without it
 #: (what the first "no air feet" run did); for one run, without editing this file, override it:
 #: ``env.rewards.feet_air_time.weight=0.0`` (tools/slurm/submit.sh asks for it).
-FEET_AIR_TIME_WEIGHT = 0.0
+FEET_AIR_TIME_WEIGHT = 0.25
 
 #: What turns the joint targets of the policy into torque while it trains.
 #:

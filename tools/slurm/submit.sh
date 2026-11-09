@@ -213,8 +213,14 @@ if ask_yes_no "   change the training and SLURM defaults?"; then
     SEED="$(ask_text "   seed (empty = default)" "")"
     if [[ "$TASK" == *Unitree-Go1* ]]; then
         echo "   -- Go1 task options"
-        if ! ask_yes_default "   train with the feet air time (swing time) reward?"; then
+        # the weight the task is written with: "on" must mean a weight above zero, whatever it is
+        AIR_WEIGHT="$(sed -nE 's/^FEET_AIR_TIME_WEIGHT[[:space:]]*=[[:space:]]*([0-9.]+).*/\1/p' \
+            isaaclab_experiments/go1_locomotion/rough_env_cfg.py | head -1)"
+        if ! ask_yes_default "   train with the feet air time (swing time) reward? (weight in the task: ${AIR_WEIGHT:-unknown})"; then
             OVERRIDES+=("env.rewards.feet_air_time.weight=0.0"); RUN_PARTS+=("noairtime")
+        elif [ -z "$AIR_WEIGHT" ] || [ "$AIR_WEIGHT" = "0" ] || [ "$AIR_WEIGHT" = "0.0" ]; then
+            warn "FEET_AIR_TIME_WEIGHT is ${AIR_WEIGHT:-unreadable} in rough_env_cfg.py, so 'on' would train without it; using 0.25"
+            OVERRIDES+=("env.rewards.feet_air_time.weight=0.25")
         fi
         if [[ "$TASK" == *-CCR-* || "$TASK" == *-ContactFramework-* ]]; then
             while true; do

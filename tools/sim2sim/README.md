@@ -70,10 +70,11 @@ python isaaclab_experiments/play_rsl_rl.py --task IL4OP-Velocity-Rough-Unitree-G
 # -> logs/rsl_rl/unitree_go1_rough/<run>/exported/policy.pt
 ```
 
-Pass `--obs_dim` for anything but the default 45: `49` for the Go1 policies that observe the
-contact estimate (the CEP and contact-framework tasks; CCR and baseline policies are 45), `48` /
-`52` for Go1 policies trained while the base linear velocity was still in the observation, and
-`57` / `60` / `61` for Go2W flat / rough / flat-z.
+The harness reads the observation size from the policy and picks the layout to match: 45 numbers
+are the Go1's own, 49 add the four ContactNet probabilities (the CEP and contact-framework tasks;
+CCR and baseline policies read 45), 48 / 52 are the same for policies trained while the base
+linear velocity was still observed, and Go2W flat / rough / flat-z read 57 / 60 / 61. A size it has
+no layout for is reported, not guessed; `--obs_dim` is only there to assert what you expect.
 
 A policy also has to be run with the nominal pose it was trained around, because that pose
 is the zero of both its action and the joint positions it reads. `--nominal legacy` is the
@@ -183,6 +184,7 @@ Known limits, so the results are read for what they are:
   `kd`) closes that gap, and is the setting to use when comparing against numbers from Isaac Lab;
 - the Go1 policies that observe the contact estimate run ContactNet on the simulated state,
   standardized with statistics measured for it in `cnet.py` -- the paper does not publish its own.
+  The estimator advances every control cycle, whoever has the legs, as it would on the robot.
 
 ## Isaac Lab and MuJoCo, side by side
 

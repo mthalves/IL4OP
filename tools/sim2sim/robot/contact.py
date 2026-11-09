@@ -59,7 +59,14 @@ class ContactNet:
             np.concatenate(foot_vel),
         ]))
 
-    def probabilities(self) -> np.ndarray:
+    def push(self):
+        """Advance the window by one control cycle, without asking the network anything.
+
+        The estimator runs for as long as the robot does, whoever has its legs: the controller
+        that stands it up and holds it counts as much as the policy, and a policy handed the
+        legs again after a while must not find a window that stopped at the last time it had
+        them. So every cycle of every state comes through here.
+        """
         features = self._features()
         if not self.filled:                       # a fresh episode has no past to show
             self.window[:] = features
@@ -67,6 +74,9 @@ class ContactNet:
         else:
             self.window = np.roll(self.window, -1, axis=0)
             self.window[-1] = features
+
+    def probabilities(self) -> np.ndarray:
+        self.push()
         with torch.no_grad():
             logits = self.model(torch.from_numpy(self.window).float().unsqueeze(0))
             return self.cnet.contact_probabilities(logits).squeeze(0).numpy()

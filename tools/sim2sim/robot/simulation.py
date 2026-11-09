@@ -13,14 +13,24 @@ from .contact import ContactNet
 from .specs import ROBOTS
 
 class Sim2Sim:
-    def __init__(self, robot: str, policy_path: Path | None, obs_dim: int, nominal: str = "current",
-                 joint_damping: float | None = None):
+    def __init__(self, robot: str, policy_path: Path | None, obs_dim: int | None = None,
+                 nominal: str = "current", joint_damping: float | None = None):
         self.cfg = ROBOTS[robot]
         self.model = mujoco.MjModel.from_xml_path(str(self.cfg["scene"]))
         self.data = mujoco.MjData(self.model)
         self.policy = None
         if policy_path is not None:
             self._load_policy(policy_path)
+            # the policy knows how much it reads, which says what it observes: 45 numbers are the
+            # robot's own, 49 add ContactNet's four probabilities. Asking for another size is an
+            # error, not a guess
+            self.policy_inputs = self._policy_inputs()
+            if obs_dim is not None and obs_dim != self.policy_inputs:
+                raise SystemExit(f"{policy_path} reads {self.policy_inputs} numbers, not the {obs_dim} "
+                                 f"given by --obs_dim; leave it out and the harness takes it from the policy")
+            obs_dim = self.policy_inputs
+        elif obs_dim is None:
+            obs_dim = self._layout_size(self.cfg["obs"])
         self.obs_dim = obs_dim
 
         names = self.cfg["joints"]
@@ -54,6 +64,7 @@ class Sim2Sim:
         self.rest_kp = per_joint(self.cfg["rest_kp"])
         self.rest_kd = per_joint(self.cfg["rest_kd"])
         self.obs_spec = self.cfg.get(f"obs_{obs_dim}", self.cfg["obs"])
+        self._check_layout(policy_path)
         self.height_command = 0.0
         # only built when a policy asks for it: it runs a CNN+GRU at every step
         self.contact_net = ContactNet(self) if self.policy is not None and any(
@@ -81,6 +92,31 @@ class Sim2Sim:
                 f"--checkpoint {policy_path} --export --headless --max_steps 2\n"
                 f"and pass {policy_path.parent / 'exported' / 'policy.pt'}"
             ) from None
+
+    #: how many numbers each observation term is made of; the joints count once per joint
+    TERM_SIZE = {"base_lin_vel": 3, "base_ang_vel": 3, "projected_gravity": 3, "velocity_commands": 3,
+                 "height_command": 1, "contact_probabilities": 4}
+
+    def _layout_size(self, spec) -> int:
+        joints = len(self.cfg["joints"])
+        return sum(self.TERM_SIZE.get(name, joints) for name, _ in spec)
+
+    def _check_layout(self, policy_path):
+        """The layout picked for this many inputs has to add up to it, or the harness cannot feed it."""
+        if self._layout_size(self.obs_spec) == self.obs_dim:
+            return
+        known = sorted({self._layout_size(self.cfg["obs"])} | {
+            self._layout_size(v) for k, v in self.cfg.items() if k.startswith("obs_") and isinstance(v, list)})
+        raise SystemExit(f"{policy_path} reads {self.obs_dim} numbers and the harness knows no layout of that "
+                         f"size for the {self.cfg['scene'].stem.split('_')[0]} (it knows {known}): "
+                         "add one to robot/specs.py")
+
+    def _policy_inputs(self) -> int:
+        """Size of the observation the loaded policy reads: the input of its first layer."""
+        for _, weight in self.policy.named_parameters():
+            if weight.ndim == 2:
+                return int(weight.shape[1])
+        raise SystemExit("could not tell how many inputs the policy reads; pass --obs_dim")
 
     def _saturate(self, torque: np.ndarray) -> np.ndarray:
         """Clip to what the motors can actually deliver, as the driver does on the robot."""
