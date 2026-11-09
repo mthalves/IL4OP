@@ -48,18 +48,39 @@ ask_text() {
     printf '%s' "${answer:-$default}"
 }
 
-ask_yes_no() {
-    local answer=""
-    read -r -p "$1 [y/N]: " answer || true
-    [[ "${answer,,}" == y* ]]
+# ask_valid <prompt> <default> <regex> <what is expected> -> the first answer that matches
+# (an empty answer is the default). The question is asked again until the answer is valid.
+ask_valid() {
+    local prompt="$1" default="$2" pattern="$3" expected="$4" answer tries=0
+    while true; do
+        answer="$(ask_text "$prompt" "$default")"
+        [[ "$answer" =~ $pattern ]] && { printf '%s' "$answer"; return 0; }
+        printf '\033[1;33m[warn]\033[0m %s\n' "'$answer' is not valid: $expected" >&2
+        # an input that has ended answers with the default every time: do not ask for ever
+        tries=$((tries + 1))
+        [ "$tries" -lt 20 ] || die "no valid answer to '$prompt' after $tries attempts"
+    done
 }
 
-# the same question for an option that is on unless it is turned off
-ask_yes_default() {
-    local answer=""
-    read -r -p "$1 [Y/n]: " answer || true
-    [[ "${answer,,}" != n* ]]
+# ask_confirm <prompt> <default y|n>: only y/yes and n/no are answers; anything else asks again
+ask_confirm() {
+    local prompt="$1" default="$2" answer hint="[y/N]"
+    [ "$default" = "y" ] && hint="[Y/n]"
+    while true; do
+        read -r -p "$prompt $hint: " answer || { echo; answer=""; }
+        case "${answer,,}" in
+            "") [ "$default" = "y" ]; return ;;
+            y|yes) return 0 ;;
+            n|no) return 1 ;;
+        esac
+        echo "    please answer y or n"
+    done
 }
+
+ask_yes_no() { ask_confirm "$1" n; }
+
+# the same question for an option that is on unless it is turned off
+ask_yes_default() { ask_confirm "$1" y; }
 
 # ask_menu <prompt> <option>... -> index (1-based) of the chosen option in MENU_CHOICE
 ask_menu() {
@@ -110,7 +131,7 @@ family_of() {
 
 # ----------------------------------------------------------------- 1. the user
 title "IL4OP training submission"
-USER_NAME="$(ask_text "1) Your user name" "${USER:-}")"
+USER_NAME="$(ask_valid "1) Your user name" "${USER:-}" '^[A-Za-z0-9_.-]*$' "letters, digits, '_', '.' and '-' only (it goes into the job name)")"
 [ -n "$USER_NAME" ] || warn "no user name given: the job name will only carry the task"
 
 while true; do
@@ -132,14 +153,17 @@ fi
 
 # ------------------------------------------------------- 3. environment
 title "3) Which environment? (${#ALL_TASKS[@]} available)"
-FILTER="$(ask_text "   filter, e.g. Go1 or Anymal (empty = list all)" "")"
-FAMILIES=()
-for task in "${ALL_TASKS[@]}"; do
-    [ -n "$FILTER" ] && [[ "${task,,}" != *"${FILTER,,}"* ]] && continue
-    family="$(family_of "$task")"
-    [[ " ${FAMILIES[*]-} " == *" $family "* ]] || FAMILIES+=("$family")
+while true; do
+    FILTER="$(ask_text "   filter, e.g. Go1 or Anymal (empty = list all)" "")"
+    FAMILIES=()
+    for task in "${ALL_TASKS[@]}"; do
+        [ -n "$FILTER" ] && [[ "${task,,}" != *"${FILTER,,}"* ]] && continue
+        family="$(family_of "$task")"
+        [[ " ${FAMILIES[*]-} " == *" $family "* ]] || FAMILIES+=("$family")
+    done
+    [ "${#FAMILIES[@]}" -gt 0 ] && break
+    warn "no task matches '$FILTER'"
 done
-[ "${#FAMILIES[@]}" -gt 0 ] || die "no task matches '$FILTER'"
 ask_menu "   environment" "${FAMILIES[@]}"
 FAMILY="${FAMILIES[$((MENU_CHOICE - 1))]}"
 
@@ -199,19 +223,69 @@ if ! "$ENV_PYTHON" -c \
 fi
 echo "   ok"
 
-# ------------------------------------------------------------ 6. advanced options
-NUM_ENVS="$DEF_NUM_ENVS"; MAX_ITERATIONS="$DEF_MAX_ITERATIONS"
-TIME_LIMIT="$DEF_TIME"; PARTITION="$DEF_PARTITION"; CPUS="$DEF_CPUS"; MEM="$DEF_MEM"
+# ----------------------------------------------------- 6. from scratch, or resume
 SEED=""; VIDEO=0; EXTRA=""
 OVERRIDES=(); RUN_PARTS=()
+RESUME=0; RESUME_PATH=""; RESUME_ITER=""; RESUME_EXPERIMENT=""
 
-title "6) Advanced options"
+title "6) Start from scratch or resume a run?"
+ask_menu "   training" "from scratch" "resume a run from one of its checkpoints"
+if [ "$MENU_CHOICE" = "2" ]; then
+    # a Go1 run only fits the variant and the terrain it was made for: the network has to match
+    WANT_CEP="-"; WANT_CCR="-"; WANT_TERRAIN="-"
+    if [[ "$TASK" == *Unitree-Go1* ]]; then
+        WANT_CEP=false; WANT_CCR=false; WANT_TERRAIN=flat
+        [[ "$TASK" == *-CEP-* || "$TASK" == *-ContactFramework-* ]] && WANT_CEP=true
+        [[ "$TASK" == *-CCR-* || "$TASK" == *-ContactFramework-* ]] && WANT_CCR=true
+        [[ "$TASK" == *-Rough-* ]] && WANT_TERRAIN=rough
+    fi
+    R_PATH=(); R_LAST=(); R_AIR=(); R_CCR=(); R_SEED=(); R_NAME=(); R_LABEL=()
+    while IFS=$'\t' read -r path experiment last air ccr_weight seed cep ccr terrain run_name; do
+        if [ "$WANT_CEP" != "-" ]; then
+            [ "$cep" = "$WANT_CEP" ] && [ "$ccr" = "$WANT_CCR" ] && [ "$terrain" = "$WANT_TERRAIN" ] || continue
+        fi
+        R_PATH+=("$path"); R_LAST+=("$last"); R_AIR+=("$air"); R_CCR+=("$ccr_weight"); R_SEED+=("$seed"); R_NAME+=("$run_name")
+        R_LABEL+=("${path#logs/rsl_rl/}   (iteration $last, seed $seed)")
+    done < <("$ENV_PYTHON" tools/slurm/run_info.py logs/rsl_rl)
+    [ "${#R_PATH[@]}" -gt 0 ] || die "no finished run of this task under logs/rsl_rl to resume.
+
+  Runs are looked for in logs/rsl_rl/<experiment>/<run>/model_<n>.pt on this machine; copy the
+  run here, or train from scratch."
+    echo "   runs that fit $TASK:"
+    ask_menu "   run" "${R_LABEL[@]}"
+    PICK=$((MENU_CHOICE - 1))
+    RESUME=1; RESUME_PATH="${R_PATH[$PICK]}"; RESUME_EXPERIMENT="$(basename "$(dirname "$RESUME_PATH")")"
+    while true; do
+        RESUME_ITER="$(ask_text "   checkpoint iteration (empty = the last, ${R_LAST[$PICK]})" "")"
+        [ -n "$RESUME_ITER" ] || RESUME_ITER="${R_LAST[$PICK]}"
+        [[ "$RESUME_ITER" =~ ^[0-9]+$ ]] && [ -f "$RESUME_PATH/model_$RESUME_ITER.pt" ] && break
+        warn "there is no model_$RESUME_ITER.pt in $RESUME_PATH (checkpoints are saved every 50 iterations)"
+    done
+    DEF_MAX_ITERATIONS="$(ask_valid "   MORE iterations to train after it" "10000" '^[1-9][0-9]*$' "a whole number above zero")"
+    # the run continues with the settings it was trained with, or the reward would change midway
+    [ "${R_SEED[$PICK]}" != "-" ] && SEED="${R_SEED[$PICK]}"
+    if [ "$WANT_CEP" != "-" ]; then
+        [ "${R_AIR[$PICK]}" != "-" ] && OVERRIDES+=("env.rewards.feet_air_time.weight=${R_AIR[$PICK]}")
+        [ "${R_CCR[$PICK]}" != "-" ] && OVERRIDES+=("env.rewards.contact_consistency.weight=${R_CCR[$PICK]}")
+        echo "   keeping the run's rewards: feet air time ${R_AIR[$PICK]}, CCR ${R_CCR[$PICK]}, seed ${R_SEED[$PICK]}"
+    fi
+    [ "${R_NAME[$PICK]}" != "-" ] && RUN_PARTS+=("${R_NAME[$PICK]}")
+    RUN_PARTS+=("resume$RESUME_ITER")
+    warn "settings given to the first run as extra arguments (agent.algorithm..., env...) are not recorded
+         here: repeat them in the extra arguments below"
+fi
+
+# ------------------------------------------------------------ 7. advanced options
+NUM_ENVS="$DEF_NUM_ENVS"; MAX_ITERATIONS="$DEF_MAX_ITERATIONS"
+TIME_LIMIT="$DEF_TIME"; PARTITION="$DEF_PARTITION"; CPUS="$DEF_CPUS"; MEM="$DEF_MEM"
+
+title "7) Advanced options"
 if ask_yes_no "   change the training and SLURM defaults?"; then
     echo "   -- training"
-    NUM_ENVS="$(ask_text "   environments to simulate" "$DEF_NUM_ENVS")"
-    MAX_ITERATIONS="$(ask_text "   training iterations" "$DEF_MAX_ITERATIONS")"
-    SEED="$(ask_text "   seed (empty = default)" "")"
-    if [[ "$TASK" == *Unitree-Go1* ]]; then
+    NUM_ENVS="$(ask_valid "   environments to simulate" "$DEF_NUM_ENVS" '^[1-9][0-9]*$' "a whole number above zero")"
+    MAX_ITERATIONS="$(ask_valid "   training iterations$([ "$RESUME" = 1 ] && echo " (more, on top of the checkpoint)")" "$DEF_MAX_ITERATIONS" '^[1-9][0-9]*$' "a whole number above zero")"
+    SEED="$(ask_valid "   seed (empty = default)" "$SEED" '^[0-9]*$' "a whole number, or empty")"
+    if [[ "$TASK" == *Unitree-Go1* ]] && [ "$RESUME" = "0" ]; then
         echo "   -- Go1 task options"
         # the weight the task is written with: "on" must mean a weight above zero, whatever it is
         AIR_WEIGHT="$(sed -nE 's/^FEET_AIR_TIME_WEIGHT[[:space:]]*=[[:space:]]*([0-9.]+).*/\1/p' \
@@ -237,10 +311,10 @@ if ask_yes_no "   change the training and SLURM defaults?"; then
     ask_yes_no "   record a video during training?" && VIDEO=1
     EXTRA="$(ask_text "   extra arguments for the training script (empty = none)" "")"
     echo "   -- slurm"
-    TIME_LIMIT="$(ask_text "   time limit (D-HH:MM:SS)" "$DEF_TIME")"
-    PARTITION="$(ask_text "   partition" "$DEF_PARTITION")"
-    CPUS="$(ask_text "   cpus per task" "$DEF_CPUS")"
-    MEM="$(ask_text "   memory" "$DEF_MEM")"
+    TIME_LIMIT="$(ask_valid "   time limit (D-HH:MM:SS)" "$DEF_TIME" '^([0-9]+-)?[0-9]+(:[0-5][0-9]){0,2}$' "minutes, HH:MM:SS, or D-HH:MM:SS")"
+    PARTITION="$(ask_valid "   partition" "$DEF_PARTITION" '^[A-Za-z0-9_.,-]+$' "a partition name")"
+    CPUS="$(ask_valid "   cpus per task" "$DEF_CPUS" '^[1-9][0-9]*$' "a whole number above zero")"
+    MEM="$(ask_valid "   memory" "$DEF_MEM" '^[1-9][0-9]*[KMGT]?$' "a number with an optional unit, e.g. 96G")"
 else
     echo "   using the defaults: $NUM_ENVS envs, $MAX_ITERATIONS iterations, $TIME_LIMIT on '$PARTITION'"
 fi
@@ -250,7 +324,15 @@ SHORT_TASK="$(printf '%s' "$TASK" | sed -E 's/^(Isaac|IL4OP)-//; s/-v[0-9]+$//' 
 JOB_NAME="$(printf '%s' "${USER_NAME:+$USER_NAME-}$SHORT_TASK" | cut -c1-60)"
 
 TRAIN_ARGS=(--task "$TASK" --headless --num_envs "$NUM_ENVS" --max_iterations "$MAX_ITERATIONS")
-[ -n "$SEED" ] && TRAIN_ARGS+=(--seed "$SEED") && RUN_PARTS+=("seed$SEED")
+if [ -n "$SEED" ]; then
+    TRAIN_ARGS+=(--seed "$SEED")
+    [ "$RESUME" = "1" ] || RUN_PARTS+=("seed$SEED")      # a resumed run carries the name it had
+fi
+if [ "$RESUME" = "1" ]; then
+    # the checkpoint is matched as a regular expression: the whole file name, not a prefix of it
+    TRAIN_ARGS+=(--resume --experiment_name "$RESUME_EXPERIMENT" --load_run "$(basename "$RESUME_PATH")"
+                 --checkpoint "model_${RESUME_ITER}\\.pt\$")
+fi
 [ "$VIDEO" = "1" ] && TRAIN_ARGS+=(--video)
 # the run folder is "<timestamp>_<run name>": what the options changed is in its name, so runs
 # of one task made with different settings or seeds are told apart without opening a config
@@ -322,6 +404,7 @@ printf '  job name    : %s\n' "$JOB_NAME"
 printf '  logs        : %s-<jobid>.out / .err\n' "$LOG_SHOWN"
 printf '  notify      : %s\n' "${MAIL_USER:-(none)}"
 printf '  slurm       : %s, %s cpus, %s, %s\n' "$PARTITION" "$CPUS" "$MEM" "$TIME_LIMIT"
+[ "$RESUME" = "1" ] && printf '  resumes     : %s at iteration %s, for %s more\n' "$RESUME_PATH" "$RESUME_ITER" "$MAX_ITERATIONS"
 printf '  training    : %s\n' "${TRAIN_ARGS[*]}"
 echo
 echo "  sbatch ${SBATCH_ARGS[*]} $SBATCH_SCRIPT ${TRAIN_ARGS[*]}"

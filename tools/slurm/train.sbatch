@@ -28,8 +28,9 @@
 #   IL4OP_SKIP_CONDA=1  skip the conda activation, e.g. when modules already provide Python
 #   IL4OP_TRAIN_SCRIPT  training entry point (default: isaaclab_experiments/train_rsl_rl.py)
 #
-# Resume an interrupted run by appending:
-#   --resume --load_run <timestamp-dir> --checkpoint model_<n>.pt
+# Resume a run by appending (submit.sh asks for all of this, and keeps the run's reward settings):
+#   --resume --experiment_name <experiment> --load_run <timestamp-dir> --checkpoint 'model_<n>\.pt$'
+# --max_iterations then counts the iterations to train ON TOP of the checkpoint.
 
 set -euo pipefail
 

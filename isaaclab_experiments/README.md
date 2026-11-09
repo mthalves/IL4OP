@@ -22,6 +22,12 @@ work in exactly the same way, which is how the navigation policy is trained.
 Common options: `--headless`, `--num_envs`, `--max_iterations`, `--seed`; for the play scripts
 `--checkpoint` (otherwise the latest run of the task), `--max_steps`, `--video`, `--real_time`.
 
+To continue a training run, `train_rsl_rl.py --resume --experiment_name <experiment> --load_run <run folder>
+--checkpoint 'model_<n>\.pt$'` loads the checkpoint with its optimizer and goes on counting from it;
+`--max_iterations` is then the number of iterations to train *on top of* it, the run is written to a new
+folder next to the old one, and the reward settings have to be the ones it was trained with.
+`tools/slurm/submit.sh` asks for all of this and takes the settings from the run.
+
 ## Planning under uncertainty
 
 `anymal_c_planning/` is the environment the planning algorithms are measured in: an Anymal-C on
